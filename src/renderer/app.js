@@ -1,6 +1,8 @@
 import { Controller } from '../core/controller.js';
 import { defaultProject, validateProject, drawingStrokes, drawingCommands, layoutProject, textBounds } from '../core/project.js';
 import { importSvg } from '../core/svg.js';
+import { parseGcode } from '../core/gcode.js';
+import { defaultSequence, validateSequence, sequenceCommands, sequencePoints } from '../core/teach.js';
 import { defaultWriting, WRITING_FONTS } from '../core/writing.js';
 
 const $ = (id) => document.getElementById(id);
@@ -11,11 +13,14 @@ let usbRefreshing = false;
 let project = defaultProject();
 let writingEnabled = false;
 let generated = null;
+let importedJob = null;
+let sequence = defaultSequence();
+let taughtJob = null;
 let selectedText = null;
 let dragging = null;
 let tab = 'draw';
 let lastLog = 0;
-const fields = ['project-name', 'size', 'feedrate', 'origin-x', 'origin-y', 'origin-z', 'writing-text', 'writing-font', 'writing-height', 'writing-letter-spacing', 'writing-line-spacing', 'writing-align', 'writing-mode-outline', 'writing-mode-centerline', 'writing-style', 'text-x', 'text-y'];
+const fields = ['project-name', 'size', 'feedrate', 'origin-x', 'origin-y', 'origin-z', 'writing-text', 'writing-font', 'writing-height', 'writing-letter-spacing', 'writing-line-spacing', 'writing-align', 'writing-mode-outline', 'writing-mode-centerline', 'writing-style', 'text-x', 'text-y', 'travel-feedrate', 'pen-lift'];
 const active = () => ['running', 'pausing', 'paused'].includes(controller.state);
 const connected = () => !['disconnected', 'faulted', 'connecting'].includes(controller.state);
 const labels = { disconnected: 'Offline', connecting: 'Connecting', uninitialized: 'Needs home', ready: 'Ready', running: 'Running', pausing: 'Pausing', paused: 'Paused', faulted: 'Faulted' };
@@ -77,6 +82,7 @@ function readProject(content) {
   }
   return validateProject({ version: 1, name: $('project-name').value,
     size: $('size').valueAsNumber, feedrate: $('feedrate').valueAsNumber,
+    travelFeedrate: $('travel-feedrate').valueAsNumber, penLift: $('pen-lift').valueAsNumber,
     origin: { x: $('origin-x').valueAsNumber, y: $('origin-y').valueAsNumber, z: $('origin-z').valueAsNumber },
     ...content });
 }
@@ -105,6 +111,9 @@ function fillProject() {
   $('project-name').value = project.name;
   $('size').value = project.size;
   $('feedrate').value = project.feedrate;
+  $('travel-feedrate').value = project.travelFeedrate ?? project.feedrate;
+  $('pen-lift').value = project.penLift ?? 10;
+  $('motion-error').textContent = '';
   for (const axis of ['x', 'y', 'z']) $(`origin-${axis}`).value = project.origin[axis];
   fillWriting();
 }
@@ -141,6 +150,9 @@ function drawTextBoxes() {
 }
 
 function draw() {
+  if (['gcode', 'teach'].includes(tab)) { drawJob(); return; }
+  $('job-endpoints').setAttribute('hidden', '');
+  $('origin-marker').removeAttribute('hidden');
   const strokes = drawingStrokes(project).map((stroke) => stroke.map(screenPoint));
   const path = (points) => points.map(([x, y], i) => `${i ? 'L' : 'M'} ${x} ${y}`).join(' ');
   $('drawing-path').setAttribute('d', strokes.map(path).join(' '));
@@ -160,8 +172,27 @@ function draw() {
   if (!dragging) drawTextBoxes();
 }
 
+function drawJob() {
+  const points = tab === 'teach' ? Array.from({ length: sequence.repeat }, () => sequencePoints(sequence)).flat() : importedJob ? [importedJob.start, ...importedJob.segments.map(({ to }) => to)] : [];
+  const path = (points) => points.map((point, i) => `${i ? 'L' : 'M'} ${screenPoint(point).join(' ')}`).join(' ');
+  const segments = tab === 'gcode' ? importedJob?.segments || [] : points.slice(1).map((to, index) => ({ from: points[index], to, rapid: false }));
+  $('drawing-path').setAttribute('d', segments.filter((s) => !s.rapid).map((s) => path([s.from, s.to])).join(' '));
+  $('travel-path').setAttribute('d', segments.filter((s) => s.rapid).map((s) => path([s.from, s.to])).join(' '));
+  $('origin-marker').setAttribute('hidden', '');
+  $('pen-marker').toggleAttribute('hidden', !controller.position);
+  if (controller.position) $('pen-marker').setAttribute('transform', `translate(${screenPoint(controller.position).join(' ')})`);
+  $('job-endpoints').toggleAttribute('hidden', !points.length);
+  if (points.length) {
+    $('job-start-marker').setAttribute('transform', `translate(${screenPoint(points[0]).join(' ')})`);
+    $('job-end-marker').setAttribute('transform', `translate(${screenPoint(points.at(-1)).join(' ')})`);
+  }
+  $('drawing-dimensions').textContent = tab === 'teach' ? `${sequence.steps.filter((step) => step.type === 'move').length} waypoints · ${sequence.repeat} repeat(s)` : importedJob ? `${importedJob.commands.length} reviewed commands · ${importedJob.distance.toFixed(1)} mm path` : 'Review G-code to display its path';
+  $('canvas-description').textContent = `${tab === 'teach' ? 'Teach sequence' : 'Reviewed G-code'}: top view of XYZ motion. Green is the first point; amber is the last. Z movement and approach to the first point are not shown. Simulator limits only.`;
+}
+
 function render() {
   const ready = controller.state === 'ready' && !controller.busy;
+  const reviewed = tab === 'gcode' ? importedJob : tab === 'teach' ? taughtJob : generated;
   const locked = active() || controller.busy || controller.state === 'connecting';
   $('connection-label').textContent = connected() ? 'Simulator connected' : 'Simulator disconnected';
   $('connection-dot').classList.toggle('online', connected());
@@ -173,6 +204,7 @@ function render() {
   $('home-hint').textContent = controller.homed ? 'Homed in simulator. Work origin is a separate project setting.' : 'Connect, then home before jogging or running.';
   for (const axis of ['x', 'y', 'z']) $(`pos-${axis}`).textContent = controller.position ? controller.position[axis].toFixed(2) : '—';
   for (const id of fields) $(id).disabled = locked;
+  $('text-boxes').toggleAttribute('hidden', tab !== 'draw');
   $('size').disabled = locked || (project.version === 2 && !project.artwork);
   $('design-size-field').hidden = project.version === 2 && !project.artwork;
   $('writing-editor').hidden = !writingEnabled;
@@ -202,25 +234,29 @@ function render() {
   $('open').disabled = locked;
   $('import-svg').disabled = locked;
   $('reset-artwork').disabled = locked || (!project.artwork && project.version !== 2);
-  $('preview').disabled = locked || (project.version === 2 && !project.texts.length && !project.artwork);
-  $('preview').textContent = generated ? '2 · Regenerate G-code' : '2 · Generate G-code';
-  $('download-gcode').disabled = !generated;
-  $('gcode-output').value = generated ? generated.commands.join('\n') + '\n' : '';
-  $('gcode-summary').textContent = generated ? `${generated.commands.length} commands · ready to review` : 'Not generated · layout editable';
-  $('gcode-status').textContent = generated ? 'Generated from the current layout. Review below or download; any layout edit requires regeneration.' : 'Create or edit your layout, then generate G-code. No connection is needed.';
-  $('run').disabled = !ready || !generated;
+  $('preview').disabled = locked || (tab === 'draw' && project.version === 2 && !project.texts.length && !project.artwork);
+  $('preview').textContent = tab === 'gcode' ? '2 · Review G-code' : tab === 'teach' ? '2 · Generate sequence G-code' : generated ? '2 · Regenerate G-code' : '2 · Generate G-code';
+  $('workflow-title').textContent = tab === 'gcode' ? 'Source → Review → Simulate' : tab === 'teach' ? 'Sequence → G-code → Play' : 'Layout → G-code → Send';
+  $('canvas-tool').textContent = tab === 'gcode' ? 'XYZ MOTION' : tab === 'teach' ? sequence.tool.toUpperCase() : 'PEN TOOL';
+  $('download-gcode').disabled = !reviewed;
+  $('gcode-output').value = reviewed ? reviewed.commands.join('\n') + '\n' : '';
+  $('gcode-summary').textContent = reviewed ? `${reviewed.commands.length} commands · ready to review` : 'Generate or review the current job first';
+  $('gcode-status').textContent = reviewed ? 'Commands below are the current reviewed job. Changes require a new review or generation.' : 'Create or edit your job, then generate or review its G-code. No connection is needed.';
+  $('run').disabled = !ready || !reviewed;
   $('pause').hidden = !active();
   $('pause').textContent = controller.state === 'paused' ? 'Resume simulation' : controller.state === 'pausing' ? 'Pausing…' : 'Pause simulation';
   $('pause').disabled = controller.state === 'pausing';
   document.querySelectorAll('[data-axis]').forEach((button) => { button.disabled = !ready; });
   $('status-message').textContent = controller.message;
-  $('job-title').textContent = active() ? `${labels[controller.state]} · ${project.name}` : controller.total && controller.completed === controller.total ? 'Your drawing is complete' : generated ? 'G-code generated' : 'Create your layout';
+  $('job-title').textContent = active() ? `${labels[controller.state]} · ${controller.jobName || project.name}` : controller.total && controller.completed === controller.total ? 'Your job is complete' : reviewed ? 'Job ready to simulate' : tab === 'teach' ? 'Create a sequence' : tab === 'gcode' ? 'Review your G-code' : 'Create your layout';
   $('progress-count').textContent = controller.total ? `${controller.completed} / ${controller.total} commands` : '—';
   $('job-progress').max = controller.total || 1;
   $('job-progress').value = controller.completed;
-  $('run-hint').textContent = active() ? '3 · Job in progress. Pause or stop the simulator below.' : !generated ? '1 · Arrange text and artwork. Then generate G-code, even while disconnected.' : !ready ? '2 · G-code ready. Download it, or connect and home the simulator for step 3.' : '3 · G-code ready. Send this generated job to the simulator.';
-  $('step-prepare').classList.toggle('active', !generated && !active());
-  $('step-preview').classList.toggle('active', generated && !active());
+  $('run-hint').textContent = active() ? '3 · Job in progress. Pause or stop the simulator below.' : !reviewed ? tab === 'gcode' ? '1 · Open or paste source, then review G-code. No connection needed.' : tab === 'teach' ? '1 · Add or record steps, then generate G-code. You can edit offline.' : '1 · Arrange text and artwork. Then generate G-code, even while disconnected.' : !ready ? '2 · G-code ready. Download it, or connect and home the simulator for step 3.' : '3 · G-code ready. Send this generated job to the simulator.';
+  $('step-prepare').querySelector('b').textContent = tab === 'gcode' ? 'Source' : tab === 'teach' ? 'Sequence' : 'Layout';
+  $('step-preview').querySelector('b').textContent = tab === 'gcode' ? 'Review G-code' : 'Generate G-code';
+  $('step-prepare').classList.toggle('active', !reviewed && !active());
+  $('step-preview').classList.toggle('active', Boolean(reviewed) && !active());
   $('step-run').classList.toggle('active', active());
   if (controller.log.length !== lastLog || controller.log.length === 150) {
     const entries = controller.log.map(({ direction, text, time }) => {
@@ -238,6 +274,7 @@ function render() {
     $('log').scrollTop = $('log').scrollHeight;
     lastLog = controller.log.length;
   }
+  renderJobEditors(ready, locked);
   draw();
 }
 
@@ -246,6 +283,8 @@ $('connect').addEventListener('click', () => perform(() => connected() ? control
 $('stop').addEventListener('click', () => controller.stop());
 $('home').addEventListener('click', () => perform(() => controller.home()));
 $('preview').addEventListener('click', () => perform(() => {
+  if (tab === 'gcode') { $('gcode-review').click(); return; }
+  if (tab === 'teach') { $('teach-generate').click(); return; }
   project = readProject();
   generated = { project: structuredClone(project), commands: drawingCommands(project) };
   $('generated-code').open = true;
@@ -253,6 +292,8 @@ $('preview').addEventListener('click', () => perform(() => {
   render();
 }));
 $('run').addEventListener('click', () => perform(async () => {
+  if (tab === 'gcode') { $('gcode-run').click(); return; }
+  if (tab === 'teach') { $('teach-run').click(); return; }
   if (!generated) throw new Error('Generate G-code before sending');
   project = readProject();
   if (JSON.stringify(project) !== JSON.stringify(generated.project)) {
@@ -277,8 +318,10 @@ for (const id of fields) $(id).addEventListener('input', () => {
   try {
     project = readProject();
     $('writing-error').textContent = '';
+    $('motion-error').textContent = '';
   } catch (error) {
     $('writing-error').textContent = writingEnabled ? `${error.message}. Preview shows the last valid layout.` : '';
+    $('motion-error').textContent = writingEnabled ? '' : `${error.message}. Canvas shows the last valid layout.`;
   }
   render();
 });
@@ -290,13 +333,28 @@ document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListe
     else item.removeAttribute('aria-current');
   });
   $('drawing-settings').hidden = tab !== 'draw';
-  $('jog-settings').hidden = tab !== 'control';
+  $('drawing-workflow').hidden = tab === 'control';
+  $('gcode-settings').hidden = tab !== 'gcode';
+  $('teach-settings').hidden = tab !== 'teach';
+  $('jog-settings').hidden = !['control', 'teach'].includes(tab);
   $('usb-settings').hidden = tab !== 'control';
-  $('page-title').textContent = tab === 'draw' ? 'Drawing workspace' : 'Manual control';
-  $('page-description').textContent = tab === 'draw' ? 'Create your layout, generate G-code, then send the checked job.' : 'Get familiar with the arm, one deliberate step at a time.';
+  $('generated-code').hidden = tab === 'control';
+  $('open').hidden = $('save').hidden = tab !== 'draw';
+  const titles = { draw: 'Drawing workspace', control: 'Manual control', gcode: 'G-code workspace', teach: 'Teach & Play' };
+  const descriptions = { draw: 'Create your layout, generate G-code, then send the checked job.', control: 'Move to coordinates or jog the simulator. USB diagnostics stay separate.', gcode: 'Open or paste XYZ G-code, review the path, then simulate.', teach: 'Record points, arrange actions, and replay a repeatable sequence.' };
+  $('page-title').textContent = titles[tab];
+  $('page-description').textContent = descriptions[tab];
+  $('canvas-instructions').textContent = tab === 'gcode' ? 'Green: first point. Amber: last point. Top view only; initial approach and Z motion are not shown.' : tab === 'teach' ? 'Move directly between recorded points. Add explicit lift points for clearance. Green: first point; amber: last point. No collision simulation.' : tab === 'control' ? 'Jog or move to explicit XYZ coordinates. The drawing is shown for reference; manual moves do not change it.' : 'Insert text, click a box to edit it, then drag it into place. Arrow keys move the selected box 1 mm; Shift moves 10 mm.';
+  $('path-legend').textContent = ['gcode', 'teach'].includes(tab) ? 'Linear XYZ motion (top view)' : 'Drawing path';
+  $('travel-legend').textContent = tab === 'gcode' ? 'Source G0 travel' : tab === 'teach' ? 'No implicit pen lift' : 'Pen-up travel';
+  render();
 }));
 document.querySelectorAll('[data-axis]').forEach((button) => button.addEventListener('click', () => perform(() =>
-  controller.jog(button.dataset.axis, Number(button.dataset.direction) * Number($('jog-step').value)))));
+  controller.jog(button.dataset.axis, Number(button.dataset.direction) * Number($('jog-step').value), $('jog-feedrate').valueAsNumber))));
+$('move-current').addEventListener('click', () => {
+  if (controller.position) for (const axis of ['x', 'y', 'z']) $(`move-${axis}`).value = controller.position[axis];
+});
+$('move-to').addEventListener('click', () => perform(() => controller.moveTo({ x: $('move-x').valueAsNumber, y: $('move-y').valueAsNumber, z: $('move-z').valueAsNumber }, $('jog-feedrate').valueAsNumber)));
 $('save').addEventListener('click', () => perform(() => {
   project = readProject();
   const url = URL.createObjectURL(new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }));
@@ -349,8 +407,9 @@ $('delete-text').addEventListener('click', () => perform(() => {
   fillWriting(); resetPreview(); render();
 }));
 $('download-gcode').addEventListener('click', () => perform(() => {
-  if (!generated) throw new Error('Generate G-code first');
-  download(`${project.name}.gcode`, generated.commands.join('\n') + '\n', 'text/plain');
+  const job = tab === 'gcode' ? importedJob : tab === 'teach' ? taughtJob : generated;
+  if (!job) throw new Error('Generate or review G-code first');
+  download(`${tab === 'gcode' ? 'reviewed' : tab === 'teach' ? sequence.name : project.name}.gcode`, job.commands.join('\n') + '\n', 'text/plain');
 }));
 function download(name, content, type) {
   const url = URL.createObjectURL(new Blob([content], { type }));
@@ -370,7 +429,7 @@ function moveText(id, x, y) {
 }
 $('text-boxes').addEventListener('pointerdown', (event) => {
   const target = event.target.closest('[data-text-id]');
-  if (!target || event.button !== 0 || active() || controller.busy || controller.state === 'connecting') return;
+  if (tab !== 'draw' || !target || event.button !== 0 || active() || controller.busy || controller.state === 'connecting') return;
   perform(() => {
     selectText(target.dataset.textId);
     const text = project.texts.find((text) => text.id === selectedText);
@@ -397,11 +456,11 @@ $('workspace').addEventListener('pointerup', endDrag);
 $('workspace').addEventListener('pointercancel', endDrag);
 $('text-boxes').addEventListener('click', (event) => {
   const box = event.target.closest('[data-text-id]');
-  if (box && !active() && !controller.busy) perform(() => selectText(box.dataset.textId));
+  if (tab === 'draw' && box && !active() && !controller.busy) perform(() => selectText(box.dataset.textId));
 });
 $('text-boxes').addEventListener('keydown', (event) => {
   const box = event.target.closest('[data-text-id]');
-  if (!box || active() || controller.busy || controller.state === 'connecting') return;
+  if (tab !== 'draw' || !box || active() || controller.busy || controller.state === 'connecting') return;
   if (['Enter', ' '].includes(event.key)) {
     event.preventDefault(); perform(() => {
       selectText(box.dataset.textId);
@@ -475,6 +534,171 @@ $('usb-export').addEventListener('click', () => {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
+function renderJobEditors(ready, locked) {
+  for (const id of ['gcode-source', 'gcode-import', 'gcode-example', 'gcode-review', 'teach-name', 'teach-tool', 'teach-repeat', 'teach-add-type', 'teach-add', 'teach-open', 'teach-generate', 'jog-feedrate', 'jog-step', 'move-x', 'move-y', 'move-z']) $(id).disabled = locked;
+  $('move-to').disabled = $('move-current').disabled = !ready;
+  $('gcode-export').disabled = !importedJob;
+  $('gcode-run').disabled = !ready || !importedJob;
+  $('teach-record').disabled = !ready;
+  $('teach-export').disabled = !taughtJob;
+  $('teach-run').disabled = !ready || !taughtJob;
+  $('teach-save').disabled = locked;
+  $('teach-add-type').querySelector('option[value="action"]').disabled = $('teach-tool').value === 'pen';
+  if ($('teach-tool').value === 'pen' && $('teach-add-type').value === 'action') $('teach-add-type').value = 'move';
+  $('teach-steps').querySelectorAll('input,select,button').forEach((element) => { element.disabled = locked; });
+  [...$('teach-steps').children].forEach((row, index, rows) => {
+    row.querySelector('[data-operation="up"]').disabled = locked || index === 0;
+    row.querySelector('[data-operation="down"]').disabled = locked || index === rows.length - 1;
+  });
+  $('teach-pump').textContent = `Simulated pump: ${controller.pump}`;
+  $('clearance-hint').textContent = `${project.penLift ?? 10} mm pen-up clearance between strokes. Work origin changes this project only.`;
+}
+
+function invalidateGcode() {
+  importedJob = null;
+  controller.completed = controller.total = 0;
+  controller.message = 'G-code source changed. Review again before sending.';
+  $('gcode-error').textContent = '';
+  $('gcode-review-info').textContent = 'Source changed. Review the complete G-code again before sending.';
+  render();
+}
+$('gcode-source').addEventListener('input', invalidateGcode);
+$('gcode-import').addEventListener('click', () => $('gcode-file').click());
+$('gcode-file').addEventListener('change', () => perform(async () => {
+  const file = $('gcode-file').files[0]; $('gcode-file').value = '';
+  if (!file) return;
+  if (file.size > 262144) throw new Error('G-code files must be smaller than 256 KB');
+  const source = await file.text();
+  if (active() || controller.busy || controller.state === 'connecting') throw new Error('Wait for the current operation before importing');
+  $('gcode-source').value = source; invalidateGcode();
+}));
+$('gcode-example').addEventListener('click', () => {
+  $('gcode-source').value = 'G21\nG90\nG0 X-20 Y280 Z10 F1200\nG1 X20 Y280 Z10 F600\nG1 X20 Y320 Z10\nG1 X-20 Y320 Z10\nG1 X-20 Y280 Z10\nM400\n';
+  invalidateGcode();
+});
+$('gcode-review').addEventListener('click', () => {
+  importedJob = null;
+  try {
+    const source = $('gcode-source').value;
+    importedJob = { ...parseGcode(source), source };
+    $('gcode-error').textContent = '';
+    const { bounds, estimatedSeconds } = importedJob;
+    $('gcode-review-info').textContent = `${importedJob.commands.length} commands · X ${bounds.min.x.toFixed(1)}…${bounds.max.x.toFixed(1)}, Y ${bounds.min.y.toFixed(1)}…${bounds.max.y.toFixed(1)}, Z ${bounds.min.z.toFixed(1)}…${bounds.max.z.toFixed(1)} mm. Ideal path time ${estimatedSeconds.toFixed(1)} s, excluding the initial approach and acceleration; simulator timing differs.`;
+    $('generated-code').open = true;
+    controller.message = 'G-code reviewed against simulator limits. Unsupported commands are never sent. Connect and home to simulate.';
+  } catch (error) { $('gcode-error').textContent = error.message; $('gcode-review-info').textContent = 'Review failed. No commands are available to send.'; controller.message = 'G-code review failed. Correct the reported line before sending.'; }
+  render();
+});
+$('gcode-export').addEventListener('click', () => { if (importedJob) download('reviewed.gcode', importedJob.commands.join('\n') + '\n', 'text/plain'); });
+$('gcode-run').addEventListener('click', () => perform(async () => {
+  if (!importedJob) throw new Error('Review G-code first');
+  await controller.runGcode(importedJob.source);
+}));
+
+function readSequence(skip = -1) {
+  const steps = [...$('teach-steps').children].filter((_, index) => index !== skip).map((row) => {
+    const value = (field) => row.querySelector(`[data-field="${field}"]`);
+    if (row.dataset.type === 'move') return { type: 'move', name: value('name').value, x: value('x').valueAsNumber, y: value('y').valueAsNumber, z: value('z').valueAsNumber, feedrate: value('feedrate').valueAsNumber };
+    if (row.dataset.type === 'wait') return { type: 'wait', milliseconds: value('milliseconds').valueAsNumber };
+    return { type: 'action', action: value('action').value };
+  });
+  return validateSequence({ version: 1, kind: 'teach', name: $('teach-name').value, tool: $('teach-tool').value, repeat: $('teach-repeat').valueAsNumber, steps });
+}
+function fillSequence() {
+  $('teach-name').value = sequence.name; $('teach-tool').value = sequence.tool; $('teach-repeat').value = sequence.repeat;
+  $('teach-steps').replaceChildren(...sequence.steps.map((step, index) => {
+    const row = document.createElement('li'); row.dataset.type = step.type;
+    const heading = document.createElement('div'); heading.className = 'section-heading';
+    const title = document.createElement('strong'); title.textContent = `${index + 1} · ${step.type === 'action' ? 'Tool action' : step.type === 'wait' ? 'Wait' : 'Move'}`;
+    heading.append(title);
+    for (const [operation, label] of [['up', '↑'], ['down', '↓'], ['delete', '×']]) {
+      const button = document.createElement('button'); button.className = 'text-button'; button.dataset.operation = operation;
+      button.textContent = label; button.setAttribute('aria-label', `${operation} step ${index + 1}`); heading.append(button);
+    }
+    row.append(heading);
+    const addInput = (field, label, type = 'number') => {
+      const wrap = document.createElement('label'); wrap.textContent = label;
+      const input = document.createElement('input'); input.dataset.field = field; input.type = type;
+      if (type === 'number') input.step = field === 'milliseconds' ? '1' : '0.1';
+      else input.maxLength = 40;
+      input.value = step[field]; input.setAttribute('aria-label', `${label} step ${index + 1}`); wrap.append(input); row.append(wrap);
+    };
+    if (step.type === 'move') {
+      addInput('name', 'Point name', 'text');
+      for (const axis of ['x', 'y', 'z']) addInput(axis, `${axis.toUpperCase()} mm`);
+      addInput('feedrate', 'Speed mm/min');
+    } else if (step.type === 'wait') addInput('milliseconds', 'Wait ms');
+    else {
+      const label = document.createElement('label'); label.textContent = 'Action';
+      const select = document.createElement('select'); select.dataset.field = 'action'; select.setAttribute('aria-label', `Action step ${index + 1}`);
+      for (const [action, title] of [['pick', sequence.tool === 'gripper' ? 'Grip / pick' : 'Pick'], ['release', 'Release'], ['neutral', 'Neutral'], ['off', 'Off']]) {
+        const option = document.createElement('option'); option.value = action; option.textContent = title; select.append(option);
+      }
+      select.value = step.action; label.append(select); row.append(label);
+    }
+    return row;
+  }));
+  $('teach-error').textContent = '';
+}
+function invalidateSequence() {
+  taughtJob = null;
+  controller.completed = controller.total = 0;
+  controller.message = 'Sequence changed. Generate G-code again before playback.';
+  $('teach-info').textContent = 'Sequence changed. Generate G-code again before playback.';
+  try { sequence = readSequence(); $('teach-error').textContent = ''; }
+  catch (error) { $('teach-error').textContent = `${error.message}. Preview retains the last valid sequence.`; }
+  render();
+}
+for (const id of ['teach-name', 'teach-tool', 'teach-repeat', 'teach-steps']) $(id).addEventListener('input', invalidateSequence);
+function addSequenceStep(record = false) {
+  sequence = readSequence();
+  const type = record ? 'move' : $('teach-add-type').value;
+  if (record && (!controller.position || controller.state !== 'ready')) throw new Error('Connect and home before recording a simulator point');
+  const point = record ? controller.position : { x: 0, y: 300, z: 10 };
+  const step = type === 'move' ? { type: 'move', name: `Point ${sequence.steps.filter((s) => s.type === 'move').length + 1}`, ...point, feedrate: 600 } : type === 'wait' ? { type: 'wait', milliseconds: 500 } : { type: 'action', action: 'off' };
+  sequence = validateSequence({ ...sequence, steps: [...sequence.steps, step] });
+  taughtJob = null; controller.completed = controller.total = 0; fillSequence(); render();
+}
+$('teach-record').addEventListener('click', () => perform(() => addSequenceStep(true)));
+$('teach-add').addEventListener('click', () => perform(() => addSequenceStep()));
+$('teach-steps').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-operation]'); if (!button || active() || controller.busy) return;
+  perform(() => {
+    const index = [...$('teach-steps').children].indexOf(button.closest('li'));
+    if (button.dataset.operation === 'delete') sequence = readSequence(index);
+    else {
+      sequence = readSequence(); const target = index + (button.dataset.operation === 'up' ? -1 : 1);
+      if (target < 0 || target >= sequence.steps.length) return;
+      [sequence.steps[index], sequence.steps[target]] = [sequence.steps[target], sequence.steps[index]];
+    }
+    taughtJob = null; controller.completed = controller.total = 0; fillSequence(); render();
+  });
+});
+$('teach-generate').addEventListener('click', () => perform(() => {
+  taughtJob = null;
+  try {
+    sequence = readSequence();
+    taughtJob = { sequence: structuredClone(sequence), commands: sequenceCommands(sequence) };
+    $('teach-info').textContent = `${sequence.steps.length} steps × ${sequence.repeat} repeat(s) · ${taughtJob.commands.length} commands. Ready to review; connect and home to play.`;
+    controller.message = 'Sequence G-code generated. Review the commands, then connect and home to play.';
+    $('generated-code').open = true;
+  } finally { render(); }
+}));
+$('teach-export').addEventListener('click', () => { if (taughtJob) download(`${sequence.name}.gcode`, taughtJob.commands.join('\n') + '\n', 'text/plain'); });
+$('teach-run').addEventListener('click', () => perform(async () => {
+  if (!taughtJob) throw new Error('Generate sequence G-code first');
+  await controller.runSequence(taughtJob.sequence);
+}));
+$('teach-save').addEventListener('click', () => perform(() => { sequence = readSequence(); download(`${sequence.name}.teach.json`, JSON.stringify(sequence, null, 2), 'application/json'); }));
+$('teach-open').addEventListener('click', () => $('teach-file').click());
+$('teach-file').addEventListener('change', () => perform(async () => {
+  const file = $('teach-file').files[0]; $('teach-file').value = ''; if (!file) return;
+  if (file.size > 262144) throw new Error('Sequence files must be smaller than 256 KB');
+  const next = validateSequence(JSON.parse(await file.text()));
+  if (active() || controller.busy || controller.state === 'connecting') throw new Error('Wait for the current operation before opening a sequence');
+  sequence = next; taughtJob = null; fillSequence(); render();
+}));
+fillSequence();
 for (const { id, name } of WRITING_FONTS) {
   const option = document.createElement('option');
   option.value = id;

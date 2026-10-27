@@ -29,6 +29,12 @@ export function validateProject(value) {
     version: value.version, name: value.name.trim(), size: value.size, feedrate: value.feedrate,
     origin: { x: value.origin.x, y: value.origin.y, z: value.origin.z },
   };
+  for (const [key, min, max, label] of [['travelFeedrate', 60, 3000, 'Travel speed'], ['penLift', 1, 30, 'Pen lift']]) {
+    if (value[key] !== undefined) {
+      if (!Number.isFinite(value[key]) || value[key] < min || value[key] > max) throw new Error(`${label} must be between ${min} and ${max}`);
+      project[key] = value[key];
+    }
+  }
   if (value.version === 2) {
     if (value.writing !== undefined) throw new Error('Layout projects use text boxes instead of single writing');
     if (!Array.isArray(value.texts) || value.texts.length > 20) throw new Error('Layout needs an array of at most 20 text boxes');
@@ -90,7 +96,7 @@ export function validateProject(value) {
   validatePosition(project.origin);
   for (const point of drawingPoints(project)) {
     validatePosition(point);
-    validatePosition({ ...point, z: point.z + 10 });
+    validatePosition({ ...point, z: point.z + (project.penLift ?? 10) });
   }
   return project;
 }
@@ -126,10 +132,11 @@ export function drawingCommands(value) {
   const project = validateProject(value);
   const strokes = drawingStrokes(project);
   if (!strokes.length) throw new Error('Add text or import artwork before generating G-code');
-  const move = (point, z = point.z) => `G1 X${point.x.toFixed(3)} Y${point.y.toFixed(3)} Z${z.toFixed(3)} F${project.feedrate}`;
-  const lift = `G1 Z${(project.origin.z + 10).toFixed(3)} F600`;
+  const move = (point, z = point.z, feedrate = project.feedrate) => `G1 X${point.x.toFixed(3)} Y${point.y.toFixed(3)} Z${z.toFixed(3)} F${feedrate}`;
+  const clearance = project.origin.z + (project.penLift ?? 10);
+  const lift = `G1 Z${clearance.toFixed(3)} F600`;
   return ['G21', 'G90', lift, ...strokes.flatMap((points) => [
-    move(points[0], project.origin.z + 10), ...points.map((point) => move(point)), lift,
+    move(points[0], clearance, project.travelFeedrate ?? project.feedrate), ...points.map((point) => move(point)), lift,
   ]), 'M400'];
 }
 

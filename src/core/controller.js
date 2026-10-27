@@ -1,6 +1,8 @@
 import { SerialSession } from '../protocol/session.js';
 import { SimulatedTransport } from '../protocol/simulator.js';
 import { drawingCommands, validatePosition } from './project.js';
+import { parseGcode } from './gcode.js';
+import { sequenceCommands } from './teach.js';
 
 export class Controller extends EventTarget {
   constructor({ createTransport = () => new SimulatedTransport(), timeout = 3000 } = {}) {
@@ -13,6 +15,8 @@ export class Controller extends EventTarget {
     this.busy = false;
     this.completed = 0;
     this.total = 0;
+    this.jobName = '';
+    this.pump = 'off';
     this.log = [];
     this.message = 'Connect the simulator to begin. Physical robot control is not enabled.';
   }
@@ -43,6 +47,7 @@ export class Controller extends EventTarget {
         this.state = 'faulted';
         this.homed = false;
         this.position = null;
+        this.pump = 'unknown';
         this.message = error.message;
         this.releasePause?.();
         this.releasePause = null;
@@ -61,6 +66,7 @@ export class Controller extends EventTarget {
     this.state = 'disconnected';
     this.homed = false;
     this.position = null;
+    this.pump = 'unknown';
     this.message = message;
     this.releasePause?.();
     this.releasePause = null;
@@ -83,26 +89,40 @@ export class Controller extends EventTarget {
     }
   }
 
-  async jog(axis, distance) {
+  async jog(axis, distance, feedrate = 600) {
     if (this.state !== 'ready' || this.busy || !this.position) throw new Error('Home and wait for the robot to be ready before jogging');
     if (!['x', 'y', 'z'].includes(axis) || !Number.isFinite(distance) || Math.abs(distance) > 10) throw new Error('Invalid jog step');
-    const target = validatePosition({ ...this.position, [axis]: this.position[axis] + distance });
+    return this.moveTo({ ...this.position, [axis]: this.position[axis] + distance }, feedrate);
+  }
+
+  async moveTo(position, feedrate = 600) {
+    if (this.state !== 'ready' || this.busy) throw new Error('Home and wait for the robot to be ready before moving');
+    const target = { ...validatePosition(position) };
+    if (!Number.isFinite(feedrate) || feedrate < 60 || feedrate > 3000) throw new Error('Move speed must be 60–3000 mm/min');
     this.busy = true;
     this.update();
     try {
-      await this.session.send('G21');
-      await this.session.send('G90');
-      await this.session.send(`G1 X${target.x.toFixed(3)} Y${target.y.toFixed(3)} Z${target.z.toFixed(3)} F600`);
-      this.message = 'Jog completed in simulator.';
-    } finally {
-      this.busy = false;
-      this.update();
-    }
+      await this.session.send('G21'); await this.session.send('G90');
+      await this.session.send(`G1 X${target.x.toFixed(3)} Y${target.y.toFixed(3)} Z${target.z.toFixed(3)} F${feedrate}`);
+      this.message = 'Move completed in simulator.';
+    } finally { this.busy = false; this.update(); }
   }
 
   async run(project) {
+    return this.execute(drawingCommands(project), project.name);
+  }
+
+  async runGcode(source) {
+    return this.execute(parseGcode(source).commands, 'Imported G-code');
+  }
+
+  async runSequence(sequence) {
+    return this.execute(sequenceCommands(sequence), sequence.name);
+  }
+
+  async execute(commands, name) {
     if (this.state !== 'ready' || this.busy) throw new Error('Home and wait for the robot to be ready before running');
-    const commands = drawingCommands(project);
+    this.jobName = name;
     const session = this.session;
     this.state = 'running';
     this.completed = 0;
@@ -120,11 +140,12 @@ export class Controller extends EventTarget {
         if (this.state !== 'running' || this.session !== session) return;
         await session.send(command);
         if (!['running', 'pausing'].includes(this.state) || this.session !== session) return;
+        if (/^M100[0-3]$/.test(command)) this.pump = { M1000: 'pump in', M1001: 'pump out', M1002: 'neutral', M1003: 'off' }[command];
         this.completed++;
         this.update();
       }
       this.state = 'ready';
-      this.message = 'Drawing complete. Simulator motion finished.';
+      this.message = 'Job complete. Simulator motion finished.';
     } finally {
       this.releasePause = null;
       this.update();

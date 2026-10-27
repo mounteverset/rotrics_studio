@@ -1053,3 +1053,23 @@ dialog p {
   .workspace { position:sticky; top:18px; }
   .inspector { max-height:calc(100vh - 60px); overflow-y:auto; padding-right:5px; }
 }
+
+#gcode-settings,#teach-settings { order:0; }
+#gcode-source { font-family:ui-monospace,monospace; font-size:10px; white-space:pre; }
+#gcode-settings .button.full,#teach-settings>.button.full,#jog-settings>.button.full { margin-top:8px; }
+.teach-steps { list-style:none; padding:0; margin:12px 0; }
+.teach-steps>li { border:1px solid var(--border); border-radius:7px; padding:12px; margin-bottom:10px; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.teach-steps .section-heading { grid-column:1/-1; margin:0 0 4px; gap:12px; }
+.teach-steps .section-heading strong { font-size:10px; margin-right:auto; }
+.teach-steps label { margin:0; font-size:9px; }
+.teach-steps label:first-of-type { grid-column:1/-1; }
+.teach-steps input,.teach-steps select { padding:7px 5px; font-size:10px; }
+.teach-steps label:last-child { grid-column:1/-1; }
+#teach-add { align-self:center; }
+#teach-pump { border-top:1px solid var(--border); padding-top:12px; }
+#job-endpoints circle { stroke:white; stroke-width:1.5; }
+@media(max-width:850px) {
+  .sidebar nav { flex-wrap:wrap; }
+  .nav-item { width:auto; min-width:105px; }
+  .job-status { flex-wrap:wrap; }
+}
