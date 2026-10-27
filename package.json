@@ -1,0 +1,27 @@
+{
+  "name": "dexarm-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "An offline DexArm Studio foundation with a robot simulator",
+  "main": "src/main/main.cjs",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "node scripts/serve.js",
+    "test": "node --test",
+    "test:svg": "electron scripts/check-svg.cjs",
+    "experiment:centerline": "node scripts/run-centerline.cjs",
+    "check": "node --check src/renderer/app.js && node --check src/core/controller.js && node --check src/core/project.js && node --check src/core/writing.js && node --check src/core/font-data.js && node --check src/core/paired-font-data.js && node --check src/core/svg.js && node --check src/protocol/session.js && node --check src/protocol/simulator.js && node --check src/main/main.cjs && node --check src/main/device.js && node --check src/main/device-ipc.cjs && node --check src/main/preload.cjs"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "flo-mat": "5.0.5",
+    "opentype.js": "2.0.0"
+  },
+  "dependencies": {
+    "serialport": "13.0.0"
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "font": "DejaVuSans.ttf",
+  "text": "T A O B i g 8",
+  "scale": 1.5,
+  "simplifyTolerance": 0.05,
+  "runtime": "v24.22.0",
+  "commandCount": 464,
+  "results": [
+    {
+      "char": "T",
+      "milliseconds": 48.04,
+      "rawEdges": 63,
+      "prunedEdges": 5,
+      "penStrokes": 2,
+      "components": 1,
+      "cycles": 0
+    },
+    {
+      "char": "A",
+      "milliseconds": 20.06,
+      "rawEdges": 119,
+      "prunedEdges": 21,
+      "penStrokes": 2,
+      "components": 1,
+      "cycles": 1
+    },
+    {
+      "char": "O",
+      "milliseconds": 40.66,
+      "rawEdges": 397,
+      "prunedEdges": 8,
+      "penStrokes": 1,
+      "components": 1,
+      "cycles": 1
+    },
+    {
+      "char": "B",
+      "milliseconds": 36.83,
+      "rawEdges": 448,
+      "prunedEdges": 32,
+      "penStrokes": 2,
+      "components": 1,
+      "cycles": 2
+    },
+    {
+      "char": "i",
+      "milliseconds": 3.96,
+      "rawEdges": 32,
+      "prunedEdges": 2,
+      "penStrokes": 2,
+      "components": 2,
+      "cycles": 0
+    },
+    {
+      "char": "g",
+      "milliseconds": 31.3,
+      "rawEdges": 535,
+      "prunedEdges": 24,
+      "penStrokes": 2,
+      "components": 1,
+      "cycles": 1
+    },
+    {
+      "char": "8",
+      "milliseconds": 66.5,
+      "rawEdges": 739,
+      "prunedEdges": 34,
+      "penStrokes": 2,
+      "components": 1,
+      "cycles": 2
+    }
+  ]
+}

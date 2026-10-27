@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>DexArm Studio</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#"><span class="brand-mark" aria-hidden="true">d.</span> DexArm <strong>Studio</strong><span class="version">ALPHA</span></a>
+    <div class="connection"><span class="status-dot" id="connection-dot"></span><span id="connection-label">Simulator disconnected</span><button id="connect" class="button small">Connect simulator</button></div>
+    <button id="stop" class="button stop" disabled><span aria-hidden="true">■</span> Stop simulation</button>
+  </header>
+  <div class="app-layout">
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <p class="eyebrow">WORKSPACE</p>
+      <nav><button class="nav-item selected" data-tab="draw" aria-current="page"><span aria-hidden="true">◇</span> Draw <span class="nav-index">01</span></button><button class="nav-item" data-tab="control"><span aria-hidden="true">⌘</span> Control <span class="nav-index">02</span></button></nav>
+      <div class="sidebar-note"><span class="chip">SIMULATION</span><h2>A place to try things.</h2><p>Explore the workflow without moving a physical robot.</p><p>USB diagnostics are in Control. Physical motion awaits firmware validation.</p></div>
+      <a class="sidebar-footer" href="#activity">Open command activity <span aria-hidden="true">↗</span></a>
+    </aside>
+    <main>
+      <div class="page-heading"><div><p class="eyebrow">YOUR IDEAS, IN MOTION</p><h1 id="page-title">Drawing workspace</h1><p id="page-description">Create your layout, generate G-code, then send the checked job.</p></div><div class="file-actions"><button id="open" class="button">Open project</button><button id="save" class="button">Save project <span aria-hidden="true">↗</span></button><input id="project-file" type="file" accept=".json,application/json" hidden></div></div>
+      <div class="notice"><span aria-hidden="true">◉</span><p><strong>Simulator mode</strong> · Workspace limits and motion are illustrative. The canvas shows simulation; USB diagnostics are separate.</p></div>
+      <section class="card run-card workflow-card"><h2>Layout → G-code → Send</h2><p id="run-hint" role="status">1. Create your layout. 2. Generate G-code. 3. Connect and home to simulate.</p><button id="preview" class="button primary full">2 · Generate G-code</button><button id="download-gcode" class="button full" disabled>Download .gcode</button><button id="run" class="button full" disabled>3 · Send to simulator →</button><button class="button full" disabled title="Physical job sending awaits firmware and calibration validation">Send to robot · unavailable</button><p class="hint">Physical robot sending is not enabled. Downloaded G-code uses illustrative simulator limits.</p><button id="pause" class="button full" hidden>Pause simulation</button></section>
+      <div class="studio-grid">
+        <section class="workspace card" aria-label="Drawing preview">
+          <div class="workspace-toolbar"><div class="steps" aria-label="Job workflow"><span id="step-prepare" class="active">1 <b>Layout</b></span><span aria-hidden="true">›</span><span id="step-preview">2 <b>Generate G-code</b></span><span aria-hidden="true">›</span><span id="step-run">3 <b>Send</b></span></div><span class="unit-label">TOP VIEW · mm</span></div>
+          <div class="canvas-wrap">
+            <svg id="workspace" viewBox="0 0 760 540" role="group" aria-labelledby="canvas-title canvas-description">
+              <title id="canvas-title">Simulated drawing workspace</title><desc id="canvas-description">A star drawing with travel paths, work origin, and simulated pen position. Limits are illustrative, not verified DexArm limits.</desc>
+              <defs><pattern id="minor-grid" width="22" height="22" patternUnits="userSpaceOnUse"><path d="M 22 0 L 0 0 0 22" class="grid-line"/></pattern><pattern id="grid" width="110" height="110" patternUnits="userSpaceOnUse"><rect width="110" height="110" fill="url(#minor-grid)"/><path d="M 110 0 L 0 0 0 110" class="major-grid-line"/></pattern></defs>
+              <rect x="50" y="45" width="660" height="440" rx="5" fill="url(#grid)" class="bed"/>
+              <path d="M 380 45 V485 M50 265 H710" class="axis-line"/>
+              <text x="50" y="30" class="axis-text">X −150</text><text x="665" y="30" class="axis-text">X +150</text><text x="16" y="490" class="axis-text">180</text><text x="16" y="50" class="axis-text">380</text>
+              <g id="drawing-layer"><path id="travel-path" class="travel-path"/><path id="drawing-path" class="drawing-path"/><g id="origin-marker"><circle r="6" class="origin-ring"/><path d="M-11 0 H11 M0 -11 V11" class="origin-cross"/><text x="14" y="-12" class="origin-text">WORK ORIGIN</text></g></g>
+              <g id="text-boxes" aria-label="Text boxes"></g>
+              <g id="pen-marker" hidden><circle r="12" class="pen-halo"/><circle r="4" class="pen-dot"/></g>
+              <text x="380" y="521" text-anchor="middle" class="axis-text">SIMULATED WORKSPACE · 300 × 200 mm</text>
+            </svg>
+            <div class="canvas-caption"><span class="chip white">PEN TOOL</span><span id="drawing-dimensions">80 mm design</span></div>
+          </div>
+          <p class="canvas-instructions">Insert text, click a box to edit it, then drag it into place. Arrow keys move the selected box 1 mm; Shift moves 10 mm.</p>
+          <div class="canvas-legend"><span><i class="legend-line"></i> Drawing path</span><span><i class="legend-line dashed"></i> Pen-up travel</span><span><i class="legend-point"></i> Simulated pen</span></div>
+          <div class="job-status"><div><span class="eyebrow">JOB STATUS</span><strong id="job-title">Let’s make your first drawing</strong><p id="status-message" role="status" aria-live="polite"></p></div><span id="progress-count" class="progress-count">—</span></div>
+          <progress id="job-progress" max="1" value="0" aria-label="Simulated job command progress"></progress>
+        </section>
+        <aside class="inspector" aria-label="Device and drawing settings">
+
+          <section class="card" id="drawing-settings"><div class="section-heading"><h2>Drawing setup</h2><span class="muted">01</span></div><div class="artwork-actions"><button id="import-svg" class="button">Import SVG</button><button id="write-text" class="button">Insert text</button><button id="reset-artwork" class="button" disabled>Use star</button><input id="svg-file" type="file" accept=".svg,image/svg+xml" hidden></div><div class="artwork-info"><strong id="artwork-name">Built-in star</strong><span id="artwork-details">1 stroke · 11 points</span></div><label id="text-list-field" hidden>Text boxes<select id="text-list" aria-label="Select text box"></select></label><div id="writing-editor" hidden><div class="section-heading"><h3>Selected text</h3><button id="delete-text" class="text-button">Delete text</button></div>
+              <label for="writing-text">Text to write</label>
+              <textarea id="writing-text" rows="3" maxlength="160" spellcheck="false" aria-describedby="writing-help writing-error">Hello DexArm!</textarea>
+              <label>Pen font<select id="writing-font"></select></label><label>Font style<select id="writing-style"><option value="regular">Regular</option><option value="bold">Bold</option><option value="italic">Italic</option><option value="bold-italic">Bold italic</option></select></label><p id="style-help" class="hint">Styles use the actual font paths. Centerline changes the pen route, not the pen's physical thickness.</p><fieldset id="writing-path-mode" class="writing-path-mode" aria-describedby="writing-mode-help">
+                <legend>Pen path</legend>
+                <div class="writing-mode-options">
+                  <label class="writing-mode-card" title="Outline traces the outside and inside borders of each letter. A T becomes a closed loop around its shape.">
+                    <span><input id="writing-mode-outline" name="writing-mode" type="radio" value="outline"> Outline</span>
+                    <svg viewBox="0 0 80 56" role="img" aria-label="Outline T: a closed path around the letter"><path d="M12 7 H68 V19 H47 V49 H33 V19 H12 Z"/></svg>
+                    <small>Trace the borders</small>
+                  </label>
+                  <label class="writing-mode-card" title="Centerline follows the middle of each stroke. A simple T is a horizontal stroke and a vertical stroke; converted serifs may need extra paths.">
+                    <span><input id="writing-mode-centerline" name="writing-mode" type="radio" value="centerline" checked> Centerline</span>
+                    <svg viewBox="0 0 80 56" role="img" aria-label="Centerline T: one horizontal stroke and one vertical stroke"><path class="letter-guide" d="M12 7 H68 V19 H47 V49 H33 V19 H12 Z"/><path d="M17 13 H63 M40 13 V44"/></svg>
+                    <small>Write the middle</small>
+                  </label>
+                </div>
+                <p id="writing-mode-help" class="hint">Centerline writes through the middle of the letter.</p>
+                <p class="hint mode-preview-caption">Illustrative T above. The main canvas shows your actual font and generated paths.</p>
+              </fieldset>
+              <div class="field-row"><label>Letter height <span class="input-unit">mm</span><input id="writing-height" type="number" min="2" max="40" step="0.5" value="10"></label><label>Letter spacing <span class="input-unit">mm</span><input id="writing-letter-spacing" type="number" min="0" max="10" step="0.1" value="0.5"></label></div>
+              <div class="field-row"><label>Line spacing <span class="input-unit">× height</span><input id="writing-line-spacing" type="number" min="1" max="3" step="0.1" value="1.5"></label><label>Alignment<select id="writing-align"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div>
+              <div class="field-row"><label>Box X offset <span class="input-unit">mm</span><input id="text-x" type="number" step="0.1" value="0"></label><label>Box Y offset <span class="input-unit">mm</span><input id="text-y" type="number" step="0.1" value="0"></label></div><p class="hint">Box center relative to the work origin. Alignment positions lines within this box.</p><p id="writing-help" class="hint">Offline pen fonts · English letters, numbers, punctuation. Enter for a new line. Height sets the capital letter size; each box can be positioned independently.</p>
+              <p id="writing-error" class="field-error" role="status" aria-live="polite"></p>
+            </div><label>Project name<input id="project-name" maxlength="80" value="First light"></label><div class="field-row"><label id="design-size-field">Design size <span class="input-unit">mm</span><input id="size" type="number" min="10" max="140" step="1" value="80"></label><label>Feed rate <span class="input-unit">mm/min</span><input id="feedrate" type="number" min="60" max="3000" step="60" value="1200"></label></div><div class="origin-heading"><h3>Work origin</h3><button id="use-position" class="text-button" disabled>Use pen position</button></div><div class="field-row origin-fields"><label>X <small>mm</small><input id="origin-x" type="number" value="0" step="1"></label><label>Y <small>mm</small><input id="origin-y" type="number" value="280" step="1"></label><label>Pen Z <small>mm</small><input id="origin-z" type="number" value="0" step="0.1"></label></div><p class="hint">10 mm pen-up clearance between strokes. Setting the origin changes this project only.</p><details class="svg-help"><summary>Supported SVG artwork</summary><p>Paths (M/L/H/V/C/S/Q/T/Z), lines, polygons, polylines, rectangles, circles, and ellipses. Group transforms: translate, scale, rotate, matrix.</p><p>Export plain visible paths. Convert text and arcs to Bézier paths; remove styles, images, clipping, and references. Filled shapes become outlines. The longest dimension is scaled to Design size.</p></details></section>
+          <section class="card device-card"><div class="section-heading"><h2>Device</h2><span class="chip">SIMULATOR</span></div><div class="device-name"><span class="device-symbol" aria-hidden="true">⌁</span><div><strong>DexArm</strong><span>Virtual pen module</span></div><span id="device-state" class="state-label">Offline</span></div><div class="coordinates"><div><span>X <small>mm</small></span><strong id="pos-x">—</strong></div><div><span>Y <small>mm</small></span><strong id="pos-y">—</strong></div><div><span>Z <small>mm</small></span><strong id="pos-z">—</strong></div></div><button id="home" class="button full" disabled>⌂ &nbsp; Home simulator</button><p id="home-hint" class="hint">Connect first. Homing requires an explicit action.</p></section>
+          <section class="card" id="jog-settings" hidden><div class="section-heading"><h2>Manual control</h2><span class="chip">mm</span></div><label>Jog step<select id="jog-step"><option value="1">1 mm · fine</option><option value="5" selected>5 mm · normal</option><option value="10">10 mm · coarse</option></select></label><div class="jog-pad"><button class="button" data-axis="y" data-direction="1">Y +</button><div><button class="button" data-axis="x" data-direction="-1">X −</button><span aria-hidden="true">✛</span><button class="button" data-axis="x" data-direction="1">X +</button></div><button class="button" data-axis="y" data-direction="-1">Y −</button></div><div class="field-row"><button class="button" data-axis="z" data-direction="1">Z +</button><button class="button" data-axis="z" data-direction="-1">Z −</button></div><p class="hint">Discrete steps at 600 mm/min. Home first; jogging is locked during a job.</p></section>
+          <section class="card" id="usb-settings" hidden>
+            <div class="section-heading"><h2>USB diagnostics</h2><span class="chip">NO MOTION</span></div>
+            <p id="usb-availability" class="hint">Use the desktop app to inspect a physical device. The canvas always shows the simulator.</p>
+            <label>Serial port<select id="usb-port"><option value="">Refresh to find ports</option></select></label>
+            <div class="field-row"><button id="usb-refresh" class="button">Refresh ports</button><button id="usb-connect" class="button">Connect USB</button></div>
+            <p id="usb-status" class="hint" role="status" aria-live="polite">USB disconnected. Physical motion is disabled.</p>
+            <div class="field-row usb-queries"><button id="usb-firmware" class="button">Read firmware</button><button id="usb-position" class="button">Read position</button></div>
+            <dl class="usb-report"><dt>Firmware report</dt><dd id="usb-firmware-report">Not requested</dd><dt>Reported XYZ · mm</dt><dd id="usb-position-report">Unknown · not physical tracking</dd></dl>
+            <button id="usb-export" class="button full">Export diagnostic report</button>
+            <details class="svg-help"><summary>USB command activity</summary><ol id="usb-log" class="usb-log"><li>No USB commands sent.</li></ol></details>
+            <p class="hint">115200 baud · 8N1. Select the computer port and data cable described in the DexArm manual. Other serial devices may appear here. A reported name does not verify compatibility. Disconnecting USB does not stop motion or disable tools.</p>
+          </section>
+
+        </aside>
+      </div>
+      <details id="generated-code" class="card activity"><summary>Generated G-code <span id="gcode-summary">Not generated · layout editable</span></summary><p id="gcode-status" class="hint">Generate G-code after arranging the layout. You can generate while disconnected.</p><textarea id="gcode-output" readonly rows="10" aria-label="Generated G-code" placeholder="Your generated commands will appear here."></textarea></details><details id="activity" class="card activity"><summary>Command activity <span>Serial transcript · simulator only</span></summary><ol id="log" aria-label="Recent command activity"><li class="empty-log">Your commands will appear here.</li></ol></details>
+      <p class="footer-note">DEXARM STUDIO <span>Local projects. Explicit motion. No cloud required.</span><span>Prototype 0.1</span></p>
+    </main>
+  </div>
+  <dialog id="error-dialog"><h2>Something needs attention</h2><p id="error-message"></p><form method="dialog"><button class="button primary">Got it</button></form></dialog>
+</body>
+</html>

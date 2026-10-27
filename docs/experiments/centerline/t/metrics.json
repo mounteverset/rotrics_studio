@@ -1,0 +1,19 @@
+{
+  "font": "DejaVuSans.ttf",
+  "text": "T",
+  "scale": 1.5,
+  "simplifyTolerance": 0.05,
+  "runtime": "v24.22.0",
+  "commandCount": 37,
+  "results": [
+    {
+      "char": "T",
+      "milliseconds": 46.02,
+      "rawEdges": 63,
+      "prunedEdges": 5,
+      "penStrokes": 2,
+      "components": 1,
+      "cycles": 0
+    }
+  ]
+}

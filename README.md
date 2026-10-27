@@ -2,24 +2,64 @@
 
 An offline desktop application foundation for the Rotrics DexArm. Drawing and jogging run in a simulator. The desktop app also offers **USB diagnostics**, with physical motion disabled.
 
-## Run
+## Build and install from source
 
-Requires Node.js 22.12 or newer and npm.
+### Requirements
+
+- Git, Node.js **22.12 or newer**, and npm. Check your installation with `node --version` and `npm --version`.
+- For the desktop app: a graphical desktop session and the operating-system libraries required by Electron. Linux needs a working display and Chromium/Electron libraries (including GTK, NSS, and audio libraries). Windows and macOS need an Electron-supported OS and CPU architecture.
+- Internet access for the initial dependency installation and the first desktop launch. Electron 45 downloads its platform runtime on first use; later launches use that installed runtime.
+
+### Clone and install
+
+Run these commands in a terminal on the destination machine:
 
 ```sh
+git clone https://github.com/mounteverset/rotrics_studio.git
+cd rotrics_studio
 npm ci
+```
+
+Use `npm ci` to install the exact versions recorded in `package-lock.json`, including development dependencies. Electron is a development dependency, so do not use `--omit=dev` for a desktop installation. Run the installation on each destination machine; do not copy `node_modules` between operating systems or CPU architectures.
+
+### Start the desktop application
+
+```sh
 npm start
 ```
 
-Electron downloads its platform runtime on first launch, which requires Internet access. Subsequent launches use the downloaded runtime. A desktop session and the usual Electron system libraries are required. Installers and signing are not configured yet.
+There is **no transpilation or bundling step and no `npm run build` command**. The checked-in HTML, CSS, JavaScript, and generated font paths are the application source; `npm start` opens them in Electron. The first launch downloads Electron if necessary. To download its runtime ahead of time, run `npx --no-install install-electron` after `npm ci`. No system font installation or font regeneration is needed. Installers, standalone executable packaging, code signing, and automatic updates are not configured.
 
-For the same interface in a browser, no dependency installation is needed:
+### Start the browser interface
+
+For drawing, G-code generation/export, and simulation in a browser, Node.js alone is sufficient; `npm ci` is not required:
 
 ```sh
 npm run dev
 ```
 
-Open **http://127.0.0.1:4173**. The development server listens on loopback only; stop it with Ctrl+C.
+Open [DexArm Studio locally](http://127.0.0.1:4173). The development server listens on loopback only; stop it with Ctrl+C. Browser mode has no USB diagnostics; use the desktop app for those.
+
+### Verify the source checkout
+
+After `npm ci`, run:
+
+```sh
+npm run check
+npm test
+npm run test:svg
+```
+
+The first two commands work without a graphical desktop. `test:svg` uses Electron and needs its platform libraries and a display session. Tests use simulated transports and fake serial ports; no robot is required.
+
+If installation or startup fails:
+
+- If Electron's runtime download fails, check Internet/proxy access and run `npx --no-install install-electron`, then retry `npm start`.
+- If Linux reports missing shared libraries or no display, install the Electron prerequisites for your distribution and run inside a graphical session. The browser interface remains available with `npm run dev`.
+- SerialPort normally uses a prebuilt native binding. If npm reports blocked install scripts, review them with `npm install-scripts ls` on npm versions supporting that command; approve only the required package, such as `@serialport/bindings-cpp`, rather than enabling all dependency scripts. If your platform needs to compile it, install the platform's native build toolchain and Python required by node-gyp, then rerun `npm ci`.
+- If a USB port cannot be opened, check OS permissions/drivers and whether another application owns it. USB diagnostics are optional; they do not enable physical motion.
+
+After updating the checkout, run `git pull` followed by `npm ci` and the verification commands again. Local projects are separate `.dexarm.json` files; transfer them separately to the other machine.
 
 ## Try the workflow
 
@@ -122,4 +162,3 @@ The interface uses standard browser modules and native controls. Electron and Se
 - This is an independent prototype; official branding, old project compatibility, and reuse of upstream assets have not been established.
 
 The next milestone is validating diagnostic transcripts and a capability matrix for a specific arm/firmware/OS before enabling physical motion. USB behavior has been tested with fake ports and native binding enumeration, not an actual DexArm. See [research and delivery plan](docs/studio-research-and-plan.md).
-# rotrics_studio
