@@ -16,3 +16,7 @@ Thumbs.db
 .vscode/
 .idea/
 AGENTS.md
+
+# Personal font imports stay local
+/*.otf
+/*.ttf

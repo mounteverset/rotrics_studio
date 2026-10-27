@@ -10,21 +10,23 @@ export function defaultWriting() {
   return { text: 'Hello DexArm!', font: 'futural', fontSize: 10, letterSpacing: 0.5, lineSpacing: 1.5, align: 'left' };
 }
 
-export function validateWriting(value) {
+export function validateWriting(value, fonts = []) {
   if (!value || typeof value !== 'object' || typeof value.text !== 'string') {
     throw new Error('Enter 1–160 characters of text, including spaces and line breaks');
   }
   const text = value.text.replace(/\r\n?/g, '\n');
   if (!text.trim() || text.length > 160) throw new Error('Enter 1–160 characters of text, including spaces and line breaks');
   if (text.split('\n').length > 8) throw new Error('Writing supports at most 8 lines');
-  if (!Object.hasOwn(FONT_DATA, value.font) && !Object.hasOwn(PAIRED_FONT_DATA, value.font)) throw new Error('Choose a supported writing font');
+  const custom = fonts.find((font) => font.id === value.font);
+  if (!custom && !Object.hasOwn(FONT_DATA, value.font) && !Object.hasOwn(PAIRED_FONT_DATA, value.font)) throw new Error('Choose a supported writing font');
   const style = value.style === undefined ? 'regular' : value.style;
   if (!['regular', 'bold', 'italic', 'bold-italic'].includes(style)) throw new Error('Choose regular, bold, italic, or bold-italic writing style');
   const mode = value.mode === undefined ? 'centerline' : value.mode;
   if (!['outline', 'centerline'].includes(mode)) throw new Error('Choose outline or centerline writing');
-  const paired = Object.hasOwn(PAIRED_FONT_DATA, value.font) ? PAIRED_FONT_DATA[value.font] : null;
+  const paired = custom || (Object.hasOwn(PAIRED_FONT_DATA, value.font) ? PAIRED_FONT_DATA[value.font] : null);
+  if (custom && style !== 'regular') throw new Error('Imported fonts use their original face style. Import a separate bold or italic face to use that style.');
   if (!paired && style !== 'regular') throw new Error('Hershey fonts support regular style only');
-  const font = paired ? (style === 'regular' ? paired : paired.styles[style]) : FONT_DATA[value.font];
+  const font = paired ? (custom || style === 'regular' ? paired : paired.styles[style]) : FONT_DATA[value.font];
   if (mode === 'outline' && !paired) throw new Error('Outline mode requires DejaVu Sans or DejaVu Serif; Hershey fonts contain pen strokes only');
   const unsupported = [...new Set([...text].filter((char) => char !== '\n' && (char < ' ' || char > '~')))];
   if (unsupported.length) throw new Error(`Unsupported writing characters: ${unsupported.map((char) => JSON.stringify(char)).join(', ')}. Use English letters, numbers, and ASCII punctuation.`);
@@ -40,10 +42,11 @@ export function validateWriting(value) {
     ...(value.mode !== undefined ? { mode } : {}), ...(value.style !== undefined ? { style } : {}) };
 }
 
-export function writingLayout(value) {
-  const settings = validateWriting(value);
-  const paired = Object.hasOwn(PAIRED_FONT_DATA, settings.font) ? PAIRED_FONT_DATA[settings.font] : null;
-  const font = paired ? (!settings.style || settings.style === 'regular' ? paired : paired.styles[settings.style]) : FONT_DATA[settings.font];
+export function writingLayout(value, fonts = []) {
+  const settings = validateWriting(value, fonts);
+  const custom = fonts.find((font) => font.id === settings.font);
+  const paired = custom || (Object.hasOwn(PAIRED_FONT_DATA, settings.font) ? PAIRED_FONT_DATA[settings.font] : null);
+  const font = paired ? (custom || !settings.style || settings.style === 'regular' ? paired : paired.styles[settings.style]) : FONT_DATA[settings.font];
   const scale = settings.fontSize / (paired ? font.capHeight : 21);
   const lines = settings.text.split('\n');
   const advance = (char) => (char === ' ' ? (paired ? font.spaceAdvance : 10) : font.glyphs[char].advance) * scale;

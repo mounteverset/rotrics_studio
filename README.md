@@ -32,7 +32,7 @@ There is **no transpilation or bundling step and no `npm run build` command**. T
 
 ### Start the browser interface
 
-For drawing, G-code generation/export, and simulation in a browser, Node.js alone is sufficient; `npm ci` is not required:
+For drawing with bundled fonts, G-code generation/export, and simulation in a browser, Node.js alone is sufficient. Custom TTF/OTF imports additionally require `npm ci`:
 
 ```sh
 npm run dev
@@ -75,6 +75,10 @@ The command activity drawer shows the most recent 150 sent/received lines. The p
 
 ## Writing and pen fonts
 
+Click **Import font…** in Draw and choose a local **TTF or OTF** file (up to 2 MB). Run `npm ci` first, including for browser use. Conversion runs locally in a worker with progress and cancellation; completed paths remain available if conversion is cancelled or times out. Select the imported face from the font menu for other text boxes. Up to four faces can be loaded per project. The imported face retains its actual weight and italic style; import another face file for a different style.
+
+Both Outline and approximate Centerline are available. Coverage is printable ASCII; unavailable glyphs are reported. Centerline conversion can fail for complex decorative shapes; use Outline or another face for those characters. The import details show failures and any embedded license notice. Your original font file is not copied into the repository or saved project.
+
 Choose **Draw → Insert text**, type your text, then adjust its font, style, letter height, spacing, and left/center/right multiline alignment. Press Enter for a new line. Insert more boxes and position each independently. The canvas updates as valid text is entered. Delete the selected text with **Delete text**; an empty layout can be saved but cannot generate G-code.
 
 Choose **Pen path → Outline / Centerline** in the right-hand drawing menu. Each option has a tooltip and an illustrative T; the main canvas shows the actual generated paths. The selection also controls the compiled commands and is saved with your project.
@@ -88,11 +92,11 @@ Choose **Pen path → Outline / Centerline** in the right-hand drawing menu. Eac
 - Each logical text block is centered on its own X/Y offset from the work origin. Spaces and blank lines affect layout. Every pen stroke uses the project contact Z and configured pen lift (10 mm by default).
 - Supported input: English uppercase/lowercase letters, digits, ASCII punctuation, spaces, and line breaks. Maximum 20 text boxes, each up to 160 characters and 8 lines, subject to the combined 200-stroke/2,000-point job limit (including SVG). Unsupported characters are reported explicitly; they are never silently dropped. Shorten text, lower the height, or choose a simpler font when validation reports a limit.
 - Invalid edits leave the last valid canvas visible, show an inline explanation, and require successful G-code generation before Send is enabled. Text must also fit the illustrative workspace, including pen-up clearance.
-- Saving retains each box’s editable text, font, style, path mode, position, size, spacing, and alignment. Text boxes can share the layout with one imported SVG. Font uploads and text rotation are not implemented.
+- Saving retains each box’s editable text, font, style, path mode, position, size, spacing, and alignment. Text boxes can share the layout with one imported SVG. Imported font geometry is saved once in the project, so reopening it on another machine needs no font installation. Text rotation is not implemented.
 
 Writing execution remains simulated. USB diagnostics cannot send writing or other motion commands to a physical robot.
 
-An optional [custom-font centerline experiment](docs/experiments/centerline/README.md) tests ordinary outline fonts with OpenType.js and flo-mat. It produces centerline SVGs and validated simulator projects. This is a development command, not an app font-upload control; the report includes comparison images, measured results, and limitations.
+An optional [custom-font centerline experiment](docs/experiments/centerline/README.md) tests ordinary outline fonts with OpenType.js and flo-mat. It produces centerline SVGs and validated simulator projects. The app also supports direct font imports; the report includes comparison images, measured results, and limitations.
 
 ## G-code workspace
 
@@ -163,6 +167,9 @@ src/core/teach.js       Named sequence validation, repeat and tool-action compil
 src/core/writing.js     Stroke-font lettering, multiline layout and validation
 src/core/font-data.js   Three bundled Hershey stroke fonts
 src/core/paired-font-data.js  DejaVu outline and centerline glyphs
+src/core/custom-font.js Validated portable custom font geometry
+src/core/font-converter.js  OpenType outline and MAT centerline conversion
+src/renderer/font-worker.js  Cancellable background font conversion
 src/renderer/          Native HTML/CSS/JavaScript interface and SVG preview
 scripts/serve.js        Dependency-free browser development server
 scripts/check-svg.cjs   Native XML importer check runner
@@ -172,7 +179,7 @@ assets/fonts/          Font source and licensing notes
 docs/                  Research and product roadmap
 ```
 
-The interface uses standard browser modules and native controls. Electron and SerialPort are the direct dependencies. There is no framework build step, server deployment, cloud service, telemetry, or account requirement. The simulator runs inside the renderer; physical serial access stays in the main process behind a narrowly validated IPC interface.
+The interface uses standard browser modules and native controls. Electron and SerialPort support desktop operation; OpenType.js and flo-mat support local custom font conversion. There is no framework build step, server deployment, cloud service, telemetry, or account requirement. The simulator runs inside the renderer; physical serial access stays in the main process behind a narrowly validated IPC interface.
 
 ## Current boundaries
 
@@ -180,7 +187,7 @@ The interface uses standard browser modules and native controls. Electron and Se
 - Workspace bounds (`X −150…150`, `Y 180…380`, `Z −20…100`) are illustrative simulator limits, **not validated DexArm limits**. Projects must fit both the drawing and its configured pen lift inside them.
 - Simulator acknowledgements follow simulated completion. Real firmware can buffer motion; pause, cancellation, `M400`, command deadlines, and output shutdown need hardware verification before enabling physical commands.
 - Stop is a simulator cancellation action, not a physical emergency stop. No claim is made about laser safety, collision avoidance, calibration, or hardware accuracy.
-- Projects are versioned JSON capped at 256 KB on import. Imported settings and artwork are validated, unknown fields are discarded, and files are never executed.
+- Projects are versioned JSON capped at 4 MB on import and export. Imported settings and artwork are validated, unknown fields are discarded, and files are never executed.
 - This is an independent prototype; official branding, old project compatibility, and reuse of upstream assets have not been established.
 
 The next milestone is validating diagnostic transcripts and a capability matrix for a specific arm/firmware/OS before enabling physical motion. USB behavior has been tested with fake ports and native binding enumeration, not an actual DexArm. See [research and delivery plan](docs/studio-research-and-plan.md).

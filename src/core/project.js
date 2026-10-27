@@ -1,3 +1,4 @@
+import { validateCustomFonts } from './custom-font.js';
 import { validateWriting, writingLayout } from './writing.js';
 
 export const SIMULATOR_LIMITS = { x: [-150, 150], y: [180, 380], z: [-20, 100] };
@@ -29,6 +30,7 @@ export function validateProject(value) {
     version: value.version, name: value.name.trim(), size: value.size, feedrate: value.feedrate,
     origin: { x: value.origin.x, y: value.origin.y, z: value.origin.z },
   };
+  if (value.fonts !== undefined) project.fonts = validateCustomFonts(value.fonts);
   for (const [key, min, max, label] of [['travelFeedrate', 60, 3000, 'Travel speed'], ['penLift', 1, 30, 'Pen lift']]) {
     if (value[key] !== undefined) {
       if (!Number.isFinite(value[key]) || value[key] < min || value[key] > max) throw new Error(`${label} must be between ${min} and ${max}`);
@@ -47,13 +49,13 @@ export function validateProject(value) {
       if (!Number.isFinite(text.x) || !Number.isFinite(text.y) || Math.abs(text.x) > 300 || Math.abs(text.y) > 200) {
         throw new Error('Text box X/Y offsets must be finite and within the workspace dimensions');
       }
-      return { id: text.id, x: text.x, y: text.y, writing: validateWriting(text.writing) };
+      return { id: text.id, x: text.x, y: text.y, writing: validateWriting(text.writing, project.fonts) };
     });
   } else if (value.texts !== undefined) throw new Error('Text boxes require a version 2 layout project');
   if (value.writing !== undefined) {
     if (value.artwork !== undefined) throw new Error('Choose either writing or SVG artwork in a project');
-    project.writing = validateWriting(value.writing);
-    const { strokes } = writingLayout(project.writing);
+    project.writing = validateWriting(value.writing, project.fonts);
+    const { strokes } = writingLayout(project.writing, project.fonts);
     if (strokes.length > MAX_ARTWORK_STROKES || strokes.reduce((sum, stroke) => sum + stroke.length, 0) > MAX_ARTWORK_POINTS) {
       throw new Error(`Writing exceeds ${MAX_ARTWORK_STROKES} strokes or ${MAX_ARTWORK_POINTS} points. Shorten the text or choose a simpler font.`);
     }
@@ -105,11 +107,11 @@ export function drawingStrokes(project) {
   const { x, y, z } = project.origin;
   if (project.version === 2) {
     const artwork = project.artwork ? drawingStrokes({ ...project, version: 1 }) : [];
-    return [...artwork, ...project.texts.flatMap((text) => writingLayout(text.writing).strokes.map((stroke) =>
+    return [...artwork, ...project.texts.flatMap((text) => writingLayout(text.writing, project.fonts).strokes.map((stroke) =>
       stroke.map((point) => ({ x: x + text.x + point.x, y: y + text.y + point.y, z }))))];
   }
   if (project.writing) {
-    return writingLayout(project.writing).strokes.map((stroke) => stroke.map((point) => ({ x: x + point.x, y: y + point.y, z })));
+    return writingLayout(project.writing, project.fonts).strokes.map((stroke) => stroke.map((point) => ({ x: x + point.x, y: y + point.y, z })));
   }
   if (project.artwork) {
     return project.artwork.strokes.map((stroke) => stroke.map((point) => ({
@@ -148,8 +150,8 @@ export function layoutProject(value) {
   return { ...rest, version: 2, texts: writing ? [{ id: 'text-1', x: 0, y: 0, writing }] : [] };
 }
 
-export function textBounds(text, origin) {
-  const layout = writingLayout(text.writing);
+export function textBounds(text, origin, fonts = []) {
+  const layout = writingLayout(text.writing, fonts);
   const points = layout.strokes.flat();
   return {
     left: origin.x + text.x + Math.min(-layout.width / 2, ...points.map((p) => p.x)),

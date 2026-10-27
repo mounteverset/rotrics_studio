@@ -3,6 +3,7 @@ import { defaultProject, validateProject, drawingStrokes, drawingCommands, layou
 import { importSvg } from '../core/svg.js';
 import { parseGcode } from '../core/gcode.js';
 import { defaultSequence, validateSequence, sequenceCommands, sequencePoints } from '../core/teach.js';
+import { validateCustomFonts, MAX_CUSTOM_FONTS, MAX_PROJECT_BYTES, MAX_FONT_BYTES } from '../core/custom-font.js';
 import { defaultWriting, WRITING_FONTS } from '../core/writing.js';
 
 const $ = (id) => document.getElementById(id);
@@ -12,6 +13,9 @@ let usbState = { status: 'disconnected', busy: false, firmware: '', position: nu
 let usbRefreshing = false;
 let project = defaultProject();
 let writingEnabled = false;
+let customFonts = [];
+let fontBusy = false;
+let fontTask = null;
 let generated = null;
 let importedJob = null;
 let sequence = defaultSequence();
@@ -21,6 +25,7 @@ let dragging = null;
 let tab = 'draw';
 let lastLog = 0;
 const fields = ['project-name', 'size', 'feedrate', 'origin-x', 'origin-y', 'origin-z', 'writing-text', 'writing-font', 'writing-height', 'writing-letter-spacing', 'writing-line-spacing', 'writing-align', 'writing-mode-outline', 'writing-mode-centerline', 'writing-style', 'text-x', 'text-y', 'travel-feedrate', 'pen-lift'];
+const fontOptions = () => [...WRITING_FONTS, ...customFonts.map(({ id, name }) => ({ id, name: `${name} (imported)`, outline: true, custom: true }))];
 const active = () => ['running', 'pausing', 'paused'].includes(controller.state);
 const connected = () => !['disconnected', 'faulted', 'connecting'].includes(controller.state);
 const labels = { disconnected: 'Offline', connecting: 'Connecting', uninitialized: 'Needs home', ready: 'Ready', running: 'Running', pausing: 'Pausing', paused: 'Paused', faulted: 'Faulted' };
@@ -84,7 +89,8 @@ function readProject(content) {
     size: $('size').valueAsNumber, feedrate: $('feedrate').valueAsNumber,
     travelFeedrate: $('travel-feedrate').valueAsNumber, penLift: $('pen-lift').valueAsNumber,
     origin: { x: $('origin-x').valueAsNumber, y: $('origin-y').valueAsNumber, z: $('origin-z').valueAsNumber },
-    ...content });
+    ...content,
+    ...(customFonts.length ? { fonts: customFonts.filter((font) => content.writing?.font === font.id || content.texts?.some((text) => text.writing.font === font.id)) } : {}) });
 }
 
 function fillWriting() {
@@ -128,15 +134,15 @@ function selectText(id) {
 function drawTextBoxes() {
   const svg = (name) => document.createElementNS('http://www.w3.org/2000/svg', name);
   $('text-boxes').replaceChildren(...(project.texts || []).map((text, index) => {
-    const bounds = textBounds(text, project.origin);
+    const bounds = textBounds(text, project.origin, project.fonts);
     const [x, y] = screenPoint({ x: bounds.left, y: bounds.top });
     const group = svg('g');
     group.dataset.textId = text.id;
     group.setAttribute('role', 'button');
-    group.setAttribute('tabindex', active() || controller.busy ? '-1' : '0');
+    group.setAttribute('tabindex', active() || controller.busy || fontBusy ? '-1' : '0');
     group.setAttribute('aria-label', `Text ${index + 1}: ${text.writing.text}. Select to edit; drag or use arrow keys to move.`);
     group.setAttribute('aria-pressed', String(selectedText === text.id));
-    group.setAttribute('aria-disabled', String(active() || controller.busy || controller.state === 'connecting'));
+    group.setAttribute('aria-disabled', String(active() || controller.busy || controller.state === 'connecting' || fontBusy));
     group.classList.add('text-box');
     if (selectedText === text.id) group.classList.add('selected');
     const rect = svg('rect');
@@ -191,9 +197,9 @@ function drawJob() {
 }
 
 function render() {
-  const ready = controller.state === 'ready' && !controller.busy;
+  const ready = controller.state === 'ready' && !controller.busy && !fontBusy;
   const reviewed = tab === 'gcode' ? importedJob : tab === 'teach' ? taughtJob : generated;
-  const locked = active() || controller.busy || controller.state === 'connecting';
+  const locked = active() || controller.busy || controller.state === 'connecting' || fontBusy;
   $('connection-label').textContent = connected() ? 'Simulator connected' : 'Simulator disconnected';
   $('connection-dot').classList.toggle('online', connected());
   $('connect').textContent = connected() ? 'Disconnect' : controller.state === 'connecting' ? 'Connecting…' : 'Connect simulator';
@@ -220,17 +226,21 @@ function render() {
   });
   $('text-list').replaceChildren(...options);
   $('text-list').value = selectedText || '';
-  const outlineAvailable = WRITING_FONTS.find((font) => font.id === $('writing-font').value)?.outline;
+  const selectedFont = fontOptions().find((font) => font.id === $('writing-font').value);
+  const outlineAvailable = selectedFont?.outline;
   $('writing-mode-outline').disabled = locked || !outlineAvailable;
   $('writing-mode-centerline').disabled = locked;
-  $('writing-style').disabled = locked || !outlineAvailable;
-  $('style-help').textContent = outlineAvailable ? 'Real font variants. Centerline follows the selected style; pen thickness stays the same.' : 'Hershey fonts have a fixed stroke style. Choose DejaVu for bold or italic.';
+  $('writing-style').disabled = locked || !outlineAvailable || selectedFont?.custom;
+  $('style-help').textContent = selectedFont?.custom ? 'Imported font uses its original face style. Import a separate font file for another weight or italic face.' : outlineAvailable ? 'Real font variants. Centerline follows the selected style; pen thickness stays the same.' : 'Hershey fonts have a fixed stroke style. Choose DejaVu for bold or italic.';
   $('writing-mode-help').textContent = !outlineAvailable
     ? 'Hershey fonts contain pen strokes only. Choose DejaVu Sans or Serif to compare outlines with converted centerlines.'
     : $('writing-mode-outline').checked
       ? 'Outline follows the borders of the letter, including inner contours. Letter height uses the full capital outline.'
       : 'Centerline writes through the middle of the letter. Converted corners and serifs are approximate; inspect the main preview.';
   $('use-position').disabled = !ready;
+  $('import-font').disabled = locked;
+  $('font-import-cancel').hidden = !fontBusy;
+  $('font-import-progress').hidden = !fontBusy;
   $('open').disabled = locked;
   $('import-svg').disabled = locked;
   $('reset-artwork').disabled = locked || (!project.artwork && project.version !== 2);
@@ -252,7 +262,7 @@ function render() {
   $('progress-count').textContent = controller.total ? `${controller.completed} / ${controller.total} commands` : '—';
   $('job-progress').max = controller.total || 1;
   $('job-progress').value = controller.completed;
-  $('run-hint').textContent = active() ? '3 · Job in progress. Pause or stop the simulator below.' : !reviewed ? tab === 'gcode' ? '1 · Open or paste source, then review G-code. No connection needed.' : tab === 'teach' ? '1 · Add or record steps, then generate G-code. You can edit offline.' : '1 · Arrange text and artwork. Then generate G-code, even while disconnected.' : !ready ? '2 · G-code ready. Download it, or connect and home the simulator for step 3.' : '3 · G-code ready. Send this generated job to the simulator.';
+  $('run-hint').textContent = fontBusy ? 'Font conversion in progress. You can cancel and keep completed glyph paths.' : active() ? '3 · Job in progress. Pause or stop the simulator below.' : !reviewed ? tab === 'gcode' ? '1 · Open or paste source, then review G-code. No connection needed.' : tab === 'teach' ? '1 · Add or record steps, then generate G-code. You can edit offline.' : '1 · Arrange text and artwork. Then generate G-code, even while disconnected.' : !ready ? '2 · G-code ready. Download it, or connect and home the simulator for step 3.' : '3 · G-code ready. Send this generated job to the simulator.';
   $('step-prepare').querySelector('b').textContent = tab === 'gcode' ? 'Source' : tab === 'teach' ? 'Sequence' : 'Layout';
   $('step-preview').querySelector('b').textContent = tab === 'gcode' ? 'Review G-code' : 'Generate G-code';
   $('step-prepare').classList.toggle('active', !reviewed && !active());
@@ -310,7 +320,8 @@ $('use-position').addEventListener('click', () => perform(() => {
   render();
 }));
 for (const id of fields) $(id).addEventListener('input', () => {
-  if (id === 'writing-font' && !WRITING_FONTS.find((font) => font.id === $('writing-font').value)?.outline) {
+  if (id === 'writing-font' && fontOptions().find((font) => font.id === $('writing-font').value)?.custom) $('writing-style').value = 'regular';
+  if (id === 'writing-font' && !fontOptions().find((font) => font.id === $('writing-font').value)?.outline) {
     $('writing-mode-centerline').checked = true;
     $('writing-style').value = 'regular';
   }
@@ -357,12 +368,87 @@ $('move-current').addEventListener('click', () => {
 $('move-to').addEventListener('click', () => perform(() => controller.moveTo({ x: $('move-x').valueAsNumber, y: $('move-y').valueAsNumber, z: $('move-z').valueAsNumber }, $('jog-feedrate').valueAsNumber)));
 $('save').addEventListener('click', () => perform(() => {
   project = readProject();
-  const url = URL.createObjectURL(new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }));
+  const json = JSON.stringify(project);
+  if (new Blob([json]).size > MAX_PROJECT_BYTES) throw new Error('Project exceeds 4 MB. Use fewer imported fonts or simplify the layout.');
+  const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
   const link = document.createElement('a');
   link.href = url;
   link.download = `${project.name.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase() || 'drawing'}.dexarm.json`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}));
+function convertFontFile(file, buffer) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./font-worker.js', import.meta.url), { type: 'module' });
+    let partial;
+    let watchdog;
+    const finish = (error, font = partial) => {
+      clearTimeout(watchdog); clearTimeout(deadline); worker.terminate(); fontTask = null;
+      if (font) resolve({ font, warning: error?.message || '' });
+      else reject(error || new Error('Font conversion cancelled'));
+    };
+    const touch = () => {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(() => finish(new Error('Conversion stopped after a glyph timed out. Completed paths were kept.')), 15000);
+    };
+    const deadline = setTimeout(() => finish(new Error('Conversion time limit reached. Completed paths were kept.')), 120000);
+    fontTask = { cancel: () => finish(new Error('Conversion cancelled. Completed paths were kept.')) };
+    worker.onmessage = ({ data }) => {
+      touch();
+      if (data.stage === 'outlines') partial = data.font;
+      if (data.stage === 'centerline') {
+        partial.glyphs[data.char] = data.glyph;
+        $('font-import-progress').value = data.completed;
+        $('font-import-status').textContent = `Converting ${partial.name}: ${data.completed}/${data.total} characters…`;
+      }
+      if (data.stage === 'complete') finish(null, data.font);
+      if (data.stage === 'error') finish(new Error(data.message));
+    };
+    worker.onerror = (event) => { event.preventDefault(); finish(new Error(event.message || 'Font worker failed. Run npm ci and restart Studio.')); };
+    touch();
+    worker.postMessage({ buffer, name: file.name, text: $('writing-text').value }, [buffer]);
+  });
+}
+$('import-font').addEventListener('click', () => $('font-file').click());
+$('font-import-cancel').addEventListener('click', () => fontTask?.cancel());
+$('font-file').addEventListener('change', () => perform(async () => {
+  const file = $('font-file').files[0];
+  $('font-file').value = '';
+  if (!file) return;
+  if (active() || controller.busy || controller.state === 'connecting' || fontBusy) return;
+  $('font-import-error').textContent = '';
+  try {
+    if (!/\.(otf|ttf)$/i.test(file.name) || file.size > MAX_FONT_BYTES) throw new Error('Choose a TTF or OTF file no larger than 2 MB');
+    fontBusy = true;
+    $('font-import-status').textContent = 'Reading font outlines…';
+    $('font-import-progress').value = 0;
+    resetPreview(); render();
+    const { font: raw, warning } = await convertFontFile(file, await file.arrayBuffer());
+    const font = validateCustomFonts([raw])[0];
+    if (!Object.values(font.glyphs).some((glyph) => glyph.outline)) throw new Error('This font has no supported drawable ASCII characters');
+    const existing = customFonts.findIndex((item) => item.id === font.id);
+    if (existing >= 0) for (const [char, glyph] of Object.entries(customFonts[existing].glyphs)) {
+      if (glyph.centerline && !font.glyphs[char]?.centerline) font.glyphs[char] = glyph;
+    }
+    if (existing < 0 && customFonts.length >= MAX_CUSTOM_FONTS) throw new Error('Four imported fonts are already loaded. Open another project to start a new font library.');
+    validateCustomFonts([...customFonts.filter((item) => item.id !== font.id), font]);
+    if (existing < 0) customFonts.push(font); else customFonts[existing] = font;
+    fontBusy = false; render();
+    if (!selectedText) $('write-text').click();
+    fillFontOptions();
+    $('writing-font').value = font.id;
+    $('writing-style').value = 'regular';
+    const missingCenterline = [...$('writing-text').value].some((char) => !/\s/.test(char) && !font.glyphs[char]?.centerline);
+    if (missingCenterline) $('writing-mode-outline').checked = true;
+    $('writing-font').dispatchEvent(new Event('input'));
+    const available = Object.values(font.glyphs).filter((glyph) => glyph.centerline).length;
+    $('font-import-status').textContent = `${font.name} imported. ${available}/94 centerline characters ready.${missingCenterline ? ' Outline selected because this text has unavailable centerlines.' : ''} ${warning}`;
+    $('font-import-details').hidden = false;
+    $('font-import-report').textContent = Object.entries(font.glyphs).filter(([, glyph]) => !glyph.centerline).map(([char, glyph]) => `${char}: ${glyph.centerlineError || 'Not converted'}`).join(' · ') + (font.license ? ` · Font license: ${font.license}` : '');
+  } catch (error) {
+    $('font-import-status').textContent = '';
+    $('font-import-error').textContent = error.message;
+  } finally { fontBusy = false; render(); }
 }));
 $('import-svg').addEventListener('click', () => $('svg-file').click());
 $('svg-file').addEventListener('change', () => perform(async () => {
@@ -371,7 +457,7 @@ $('svg-file').addEventListener('change', () => perform(async () => {
   if (!file) return;
   if (file.size > 262144) throw new Error('SVG files must be smaller than 256 KB');
   const artwork = importSvg(await file.text(), file.name);
-  if (active() || controller.busy || controller.state === 'connecting') throw new Error('Wait for the current operation before importing artwork');
+  if (active() || controller.busy || controller.state === 'connecting' || fontBusy) throw new Error('Wait for the current operation before importing artwork');
   const current = readProject();
   const nextProject = readProject({ ...(current.version === 2 ? { version: 2, texts: current.texts } : {}), artwork });
   project = nextProject;
@@ -429,7 +515,7 @@ function moveText(id, x, y) {
 }
 $('text-boxes').addEventListener('pointerdown', (event) => {
   const target = event.target.closest('[data-text-id]');
-  if (tab !== 'draw' || !target || event.button !== 0 || active() || controller.busy || controller.state === 'connecting') return;
+  if (tab !== 'draw' || fontBusy || !target || event.button !== 0 || active() || controller.busy || controller.state === 'connecting') return;
   perform(() => {
     selectText(target.dataset.textId);
     const text = project.texts.find((text) => text.id === selectedText);
@@ -456,11 +542,11 @@ $('workspace').addEventListener('pointerup', endDrag);
 $('workspace').addEventListener('pointercancel', endDrag);
 $('text-boxes').addEventListener('click', (event) => {
   const box = event.target.closest('[data-text-id]');
-  if (tab === 'draw' && box && !active() && !controller.busy) perform(() => selectText(box.dataset.textId));
+  if (tab === 'draw' && !fontBusy && box && !active() && !controller.busy) perform(() => selectText(box.dataset.textId));
 });
 $('text-boxes').addEventListener('keydown', (event) => {
   const box = event.target.closest('[data-text-id]');
-  if (tab !== 'draw' || !box || active() || controller.busy || controller.state === 'connecting') return;
+  if (tab !== 'draw' || fontBusy || !box || active() || controller.busy || controller.state === 'connecting') return;
   if (['Enter', ' '].includes(event.key)) {
     event.preventDefault(); perform(() => {
       selectText(box.dataset.textId);
@@ -483,10 +569,12 @@ $('project-file').addEventListener('change', () => perform(async () => {
   const file = $('project-file').files[0];
   $('project-file').value = '';
   if (!file) return;
-  if (file.size > 262144) throw new Error('Project files must be smaller than 256 KB');
+  if (file.size > MAX_PROJECT_BYTES) throw new Error('Project files must be smaller than 4 MB');
   const nextProject = validateProject(JSON.parse(await file.text()));
-  if (active() || controller.busy) throw new Error('Wait for the current operation before opening a project');
+  if (active() || controller.busy || fontBusy) throw new Error('Wait for the current operation before opening a project');
   project = nextProject;
+  customFonts = project.fonts || [];
+  fillFontOptions();
   resetPreview();
   fillProject();
   controller.message = 'Project opened. Review its layout and origin, then generate G-code.';
@@ -569,7 +657,7 @@ $('gcode-file').addEventListener('change', () => perform(async () => {
   if (!file) return;
   if (file.size > 262144) throw new Error('G-code files must be smaller than 256 KB');
   const source = await file.text();
-  if (active() || controller.busy || controller.state === 'connecting') throw new Error('Wait for the current operation before importing');
+  if (active() || controller.busy || controller.state === 'connecting' || fontBusy) throw new Error('Wait for the current operation before importing');
   $('gcode-source').value = source; invalidateGcode();
 }));
 $('gcode-example').addEventListener('click', () => {
@@ -695,16 +783,19 @@ $('teach-file').addEventListener('change', () => perform(async () => {
   const file = $('teach-file').files[0]; $('teach-file').value = ''; if (!file) return;
   if (file.size > 262144) throw new Error('Sequence files must be smaller than 256 KB');
   const next = validateSequence(JSON.parse(await file.text()));
-  if (active() || controller.busy || controller.state === 'connecting') throw new Error('Wait for the current operation before opening a sequence');
+  if (active() || controller.busy || controller.state === 'connecting' || fontBusy) throw new Error('Wait for the current operation before opening a sequence');
   sequence = next; taughtJob = null; fillSequence(); render();
 }));
 fillSequence();
-for (const { id, name } of WRITING_FONTS) {
-  const option = document.createElement('option');
-  option.value = id;
-  option.textContent = WRITING_FONTS.find((font) => font.id === id).outline ? name : `Hershey ${name}`;
-  $('writing-font').append(option);
+function fillFontOptions() {
+  const selected = $('writing-font').value;
+  $('writing-font').replaceChildren(...fontOptions().map(({ id, name, outline }) => {
+    const option = document.createElement('option'); option.value = id; option.textContent = outline ? name : `Hershey ${name}`;
+    return option;
+  }));
+  if (fontOptions().some((font) => font.id === selected)) $('writing-font').value = selected;
 }
+fillFontOptions();
 fillProject();
 renderUsb();
 render();

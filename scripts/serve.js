@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { resolve, extname, sep } from 'node:path';
 
 const root = fileURLToPath(new URL('../src/', import.meta.url));
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css' };
+const vendor = new Map(['opentype.js/dist/opentype.mjs', 'flo-mat/browser/index.min.js'].map((name) => [`/node_modules/${name}`, resolve(root, '../node_modules', name)]));
 createServer(async (request, response) => {
   try {
     const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
@@ -12,8 +13,8 @@ createServer(async (request, response) => {
       response.writeHead(302, { Location: '/renderer/index.html' }).end();
       return;
     }
-    const file = resolve(root, `.${pathname}`);
-    if (!file.startsWith(root.endsWith(sep) ? root : root + sep) || !types[extname(file)]) {
+    const file = vendor.get(pathname) || resolve(root, `.${pathname}`);
+    if ((!vendor.has(pathname) && !file.startsWith(root.endsWith(sep) ? root : root + sep)) || !types[extname(file)]) {
       response.writeHead(404).end('Not found');
       return;
     }
