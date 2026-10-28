@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readJoypad, JoypadDrive } from '../src/core/joypad.js';
+import { readJoypad, JoypadDrive, clampJoypadMaxSpeed } from '../src/core/joypad.js';
 import { SIMULATOR_LIMITS } from '../src/core/project.js';
 
 function pad(axes = [0, 0, 0, 0], pressed = []) {
@@ -298,4 +298,61 @@ test('focus loss during a pending move disarms without clearing its lock or allo
   finish(); await movement;
   assert.equal(drive.pending, false);
   assert.equal(drive.enabled, false);
+});
+
+test('speed percentage scales normal and fine steps and feed rate; changes affect subsequent steps', async () => {
+  for (const percent of [10, 55, 100]) {
+    for (const fine of [false, true]) {
+      const { controller, drive } = setup();
+      drive.enable(pad());
+      await drive.tick(pad([1, 0, 0, 0], fine ? [4, 5] : [5]), { speedPercent: percent });
+      close(controller.position.x, (fine ? 0.2 : 1) * percent / 100);
+      close(controller.moves[0].feedrate, 600 * percent / 100);
+      await drive.tick(pad([1, 0, 0, 0], [5]), { speedPercent: 10 });
+      close(controller.moves[1].position.x - controller.moves[0].position.x, 0.1);
+      assert.equal(controller.moves[1].feedrate, 60);
+    }
+  }
+});
+
+test('invalid speed disarms without sending a move', async () => {
+  for (const speedPercent of [0, 9.9, 100.1, Infinity, NaN, null, '50']) {
+    const { controller, drive } = setup();
+    drive.enable(pad());
+    await drive.tick(pad([1, 0, 0, 0], [5]), { speedPercent });
+    assert.equal(drive.enabled, false);
+    assert.deepEqual(controller.moves, []);
+  }
+});
+
+
+test('configured maximum clamps to simulator limits and scales percentage, steps and fine mode', async () => {
+  for (const [maxSpeed, expectedMaximum] of [[0, 600], [600, 600], [2000, 2000], [3000, 3000], [120000, 3000]]) {
+    assert.equal(clampJoypadMaxSpeed(maxSpeed), expectedMaximum);
+    for (const speedPercent of [10, 50, 100]) {
+      for (const fine of [false, true]) {
+        const { controller, drive } = setup();
+        drive.enable(pad());
+        await drive.tick(pad([1, 0, 0, 0], fine ? [4, 5] : [5]), { maxSpeed, speedPercent });
+        close(controller.moves[0].feedrate, expectedMaximum * speedPercent / 100);
+        close(controller.position.x, (fine ? 0.2 : 1) * expectedMaximum / 600 * speedPercent / 100);
+        assert.ok(controller.moves[0].feedrate >= 60 && controller.moves[0].feedrate <= 3000);
+      }
+    }
+  }
+});
+
+test('invalid maximum disarms without issuing a move; high-speed targets still enforce bounds', async () => {
+  for (const maxSpeed of [NaN, Infinity, -Infinity, null, '2000']) {
+    assert.throws(() => clampJoypadMaxSpeed(maxSpeed), /finite/);
+    const { controller, drive } = setup(); drive.enable(pad());
+    await drive.tick(pad([1, 0, 0, 0], [5]), { maxSpeed });
+    assert.equal(drive.enabled, false);
+    assert.deepEqual(controller.moves, []);
+  }
+  const { controller, drive } = setup(); drive.enable(pad());
+  controller.position.x = 148;
+  await drive.tick(pad([1, 0, 0, 0], [5]), { maxSpeed: 3000 });
+  assert.equal(drive.enabled, false);
+  assert.deepEqual(controller.moves, []);
 });

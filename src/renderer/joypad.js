@@ -1,10 +1,11 @@
-import { JoypadDrive, readJoypad } from '../core/joypad.js';
+import { JoypadDrive, readJoypad, clampJoypadMaxSpeed } from '../core/joypad.js';
 
 export function setupJoypad(controller, isActive) {
   const $ = (id) => document.getElementById(id);
   const drive = new JoypadDrive(controller);
   let signature = '';
   let apiError = '';
+  let maxSpeed = 600;
   const key = (pad) => `${pad.index}:${pad.id}`;
   function pads() {
     try {
@@ -41,6 +42,29 @@ export function setupJoypad(controller, isActive) {
     $('joypad-state').textContent = drive.message;
     $('joypad-device').disabled = drive.enabled;
   }
+  function updateSpeed() {
+    const percent = $('joypad-speed').valueAsNumber;
+    $('joypad-speed-value').textContent = `${percent}%`;
+    const speed = maxSpeed * percent / 100;
+    const step = speed / 600;
+    $('joypad-speed').setAttribute('aria-valuetext', `${percent} percent, ${speed} millimeters per minute`);
+    $('joypad-speed-info').textContent = `${speed.toFixed(1)} mm/min (${(speed / 60).toFixed(1)} mm/s) · Normal step up to ${step.toFixed(2)} mm · Fine step up to ${(step / 5).toFixed(3)} mm. Changes apply to the next step.`;
+  }
+  function applyMaximum() {
+    try {
+      const entered = $('joypad-max-speed').valueAsNumber;
+      maxSpeed = clampJoypadMaxSpeed(entered);
+      $('joypad-max-speed-note').textContent = entered !== maxSpeed
+        ? `Limited to ${maxSpeed} mm/min. Allowed maximum: 600–3,000 mm/min (10–50 mm/s).`
+        : `100% = ${maxSpeed} mm/min (${(maxSpeed / 60).toFixed(1)} mm/s). Simulator cap: 3,000 mm/min.`;
+    } catch (error) { $('joypad-max-speed-note').textContent = `${error.message} Keeping ${maxSpeed} mm/min.`; }
+    $('joypad-max-speed').value = maxSpeed;
+    updateSpeed();
+  }
+  $('joypad-max-speed').addEventListener('blur', applyMaximum);
+  $('joypad-max-speed').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); applyMaximum(); } });
+  $('joypad-speed').addEventListener('input', updateSpeed);
+  updateSpeed();
   $('joypad-enable').addEventListener('click', () => {
     if (drive.enabled) drive.disable();
     else try { drive.enable(selected(pads())); } catch (error) { drive.disable(error.message); }
@@ -60,7 +84,7 @@ export function setupJoypad(controller, isActive) {
   window.addEventListener('keydown', (event) => { if (event.key === 'Escape' && drive.enabled) { drive.disable('Joypad disabled by Escape.'); refresh(); } });
   setInterval(() => {
     if (!isActive()) return;
-    void drive.tick(selected(pads()), { active: isActive(), focused: document.hasFocus() && !document.hidden }).then(refresh);
+    void drive.tick(selected(pads()), { active: isActive(), focused: document.hasFocus() && !document.hidden, speedPercent: $('joypad-speed').valueAsNumber, maxSpeed }).then(refresh);
     refresh();
   }, 100);
   return { refresh, leave };

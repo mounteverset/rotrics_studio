@@ -1087,3 +1087,7 @@ dialog p {
 .joypad-mapping dt { font-weight:600; }
 .joypad-mapping dd { margin:0; color:var(--muted); }
 #joypad-input { display:block; font-variant-numeric:tabular-nums; }
+
+#joypad-speed { padding:0; height:24px; accent-color:var(--accent); }
+#joypad-speed-value { float:right; color:var(--accent); font-weight:600; font-variant-numeric:tabular-nums; }
+.joypad-speed-scale { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); }
