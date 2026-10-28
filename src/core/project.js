@@ -93,7 +93,14 @@ export function validateProject(value) {
       strokes.push(points);
     }
     if (!hasLength) throw new Error('Artwork must have some nonzero length');
-    project.artwork = { name: artwork.name.trim(), strokes };
+    const placement = {};
+    for (const [key, limit] of [['x', 300], ['y', 200], ['rotation', 180]]) {
+      if (artwork[key] !== undefined) {
+        if (!Number.isFinite(artwork[key]) || Math.abs(artwork[key]) > limit) throw new Error(`Artwork ${key} must be between ${-limit} and ${limit}`);
+        placement[key] = artwork[key];
+      }
+    }
+    project.artwork = { name: artwork.name.trim(), strokes, ...placement };
   }
   const strokes = drawingStrokes(project);
   if (strokes.length > MAX_ARTWORK_STROKES || strokes.reduce((sum, stroke) => sum + stroke.length, 0) > MAX_ARTWORK_POINTS) {
@@ -118,8 +125,13 @@ export function drawingStrokes(project) {
     return writingLayout(project.writing, project.fonts).strokes.map((stroke) => stroke.map((point) => ({ x: x + point.x, y: y + point.y, z })));
   }
   if (project.artwork) {
-    return project.artwork.strokes.map((stroke) => stroke.map((point) => ({
-      x: x + point.x * project.size, y: y + point.y * project.size, z,
+    const artwork = project.artwork;
+    const angle = (artwork.rotation || 0) * Math.PI / 180;
+    const cosine = Math.cos(angle);
+    const sine = Math.sin(angle);
+    return artwork.strokes.map((stroke) => stroke.map((point) => ({
+      x: x + (artwork.x || 0) + (point.x * cosine - point.y * sine) * project.size,
+      y: y + (artwork.y || 0) + (point.x * sine + point.y * cosine) * project.size, z,
     })));
   }
   const points = Array.from({ length: 10 }, (_, i) => {

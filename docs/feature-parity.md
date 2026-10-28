@@ -8,7 +8,7 @@ Reviewed 27 October 2026 against the manufacturer's manual and the public Studio
 | --- | --- | --- |
 | Connect, position reports, device/firmware information | Desktop USB connection and explicit M114/M115 diagnostics | Physical motion and module detection/selection not enabled |
 | Home and XYZ jogging | Simulator home, discrete jog, configurable speed, direct XYZ moves | Physical homing, motion envelopes, and fast motion mode need validation |
-| Drawing SVG/text, dimensions, origin, generate/download G-code | Implemented; multiple editable text boxes, real DejaVu styles, outline/centerline paths; this batch adds per-text rotation and duplication | Independent imported SVG object transforms, richer shape editing, presets |
+| Drawing SVG/text, dimensions, origin, generate/download G-code | Implemented; multiple editable text boxes, real DejaVu styles, outline/centerline paths; per-text rotation and duplication, plus independent SVG size/position/rotation and removal | Richer shape editing, presets, multiple imported SVG objects |
 | Work speed, travel speed, pen offset | Separate drawing work/travel speeds and adjustable pen lift | Limits remain illustrative; default legacy output is preserved |
 | Import third-party G-code, review and execute | XYZ subset import, modal-state handling, path/bounds review, canonical export, simulator playback | Does not accept arbitrary Cura/laser/extrusion code, arcs, offsets, homing, or accessories |
 | Teach & Play, repeat, tool actions | Editable named waypoints, simulator position capture, waits, repeat, reorder/delete, suction/gripper simulation, sequence JSON save/open and G-code export | Physical hand guidance, motor release/recapture, rotary tool, hardware playback |
@@ -45,7 +45,7 @@ Drawing projects accept optional `travelFeedrate` (60–3,000 mm/min) and `penLi
 
 ## Next parity batches
 
-1. Drawing object transforms and a small built-in artwork library; richer G-code visualization and diagnostics.
+1. A small built-in artwork library and richer drawing editing; richer G-code visualization and diagnostics.
 2. Laser/raster job preparation, with tool-specific previews and formats. 3D printing, including external-slicer print inspection, is intentionally excluded from the current and foreseeable scope. Treat hardware execution as a separate milestone.
 3. Blocks programming and accessories, followed by firmware/settings/localization and platform packaging.
 

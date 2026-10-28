@@ -73,6 +73,10 @@ After updating the checkout, run `git pull` followed by `npm ci` and the verific
 
 The command activity drawer shows the most recent 150 sent/received lines. The progress display counts acknowledged commands; simulation completes after its `M400` acknowledgement.
 
+## SVG placement
+
+After **Import SVG**, use **SVG placement** to set X/Y offsets relative to the work origin and rotation (−180…180°, positive counterclockwise). **Design size** scales the SVG with its proportions preserved. Placement affects preview, saved projects, bounds validation and G-code; text boxes retain their own positions. **Remove SVG** removes only the artwork, keeping your text. Replacing the SVG resets its offsets and rotation. One imported SVG is supported per layout.
+
 ## Curved working area
 
 The Draw grid shows the **theoretical pen reach** between an inner and outer curve: blue is inside, amber outside. Change **Work origin → Pen Z** to update it, or uncheck **Show theoretical pen reach**. Radii are measured from the fixed robot base at X0/Y0; moving the project origin does not move the reach area. The wider grid shows X −220…220 and Y 130…430 mm; reach is clipped to this view. A dashed rectangle marks the unchanged simulator limits (X −150…150, Y 180…380 mm).

@@ -25,7 +25,7 @@ let selectedText = null;
 let dragging = null;
 let tab = 'draw';
 let lastLog = 0;
-const fields = ['project-name', 'size', 'feedrate', 'origin-x', 'origin-y', 'origin-z', 'writing-text', 'writing-font', 'writing-height', 'writing-letter-spacing', 'writing-line-spacing', 'writing-align', 'writing-mode-outline', 'writing-mode-centerline', 'writing-style', 'text-x', 'text-y', 'text-rotation', 'travel-feedrate', 'pen-lift'];
+const fields = ['project-name', 'size', 'feedrate', 'origin-x', 'origin-y', 'origin-z', 'writing-text', 'writing-font', 'writing-height', 'writing-letter-spacing', 'writing-line-spacing', 'writing-align', 'writing-mode-outline', 'writing-mode-centerline', 'writing-style', 'text-x', 'text-y', 'text-rotation', 'travel-feedrate', 'pen-lift', 'artwork-x', 'artwork-y', 'artwork-rotation'];
 const fontOptions = () => [...WRITING_FONTS, ...customFonts.map(({ id, name }) => ({ id, name: `${name} (imported)`, outline: true, custom: true }))];
 const active = () => ['running', 'pausing', 'paused'].includes(controller.state);
 const connected = () => !['disconnected', 'faulted', 'connecting'].includes(controller.state);
@@ -88,6 +88,14 @@ function readProject(content) {
       },
     }), ...(project.artwork ? { artwork: project.artwork } : {}) } : project.artwork ? { artwork: project.artwork } : {};
   }
+  if (content.artwork && content.artwork === project.artwork) {
+    const artwork = { ...content.artwork };
+    for (const key of ['x', 'y', 'rotation']) {
+      const value = $(`artwork-${key}`).valueAsNumber;
+      if (artwork[key] !== undefined || value !== 0) artwork[key] = value;
+    }
+    content = { ...content, artwork };
+  }
   return validateProject({ version: 1, name: $('project-name').value,
     size: $('size').valueAsNumber, feedrate: $('feedrate').valueAsNumber,
     travelFeedrate: $('travel-feedrate').valueAsNumber, penLift: $('pen-lift').valueAsNumber,
@@ -115,6 +123,11 @@ function fillWriting() {
   $('writing-error').textContent = '';
 }
 
+function fillArtwork() {
+  for (const key of ['x', 'y', 'rotation']) $(`artwork-${key}`).value = project.artwork?.[key] ?? 0;
+  $('artwork-error').textContent = '';
+}
+
 function fillProject() {
   if (project.writing) project = layoutProject(project);
   selectedText = project.texts?.[0]?.id || null;
@@ -126,6 +139,7 @@ function fillProject() {
   $('motion-error').textContent = '';
   for (const axis of ['x', 'y', 'z']) $(`origin-${axis}`).value = project.origin[axis];
   fillWriting();
+  fillArtwork();
 }
 
 function selectText(id) {
@@ -238,6 +252,7 @@ function render() {
   $('text-boxes').toggleAttribute('hidden', tab !== 'draw');
   $('size').disabled = locked || (project.version === 2 && !project.artwork);
   $('design-size-field').hidden = project.version === 2 && !project.artwork;
+  $('artwork-editor').hidden = !project.artwork;
   $('writing-editor').hidden = !writingEnabled;
   $('write-text').disabled = locked;
   $('delete-text').disabled = locked;
@@ -269,6 +284,7 @@ function render() {
   $('font-import-progress').hidden = !fontBusy;
   $('open').disabled = locked;
   $('import-svg').disabled = locked;
+  $('remove-svg').disabled = locked;
   $('reset-artwork').disabled = locked || (!project.artwork && project.version !== 2);
   $('preview').disabled = locked || (tab === 'draw' && project.version === 2 && !project.texts.length && !project.artwork);
   $('preview').textContent = tab === 'gcode' ? '2 · Review G-code' : tab === 'teach' ? '2 · Generate sequence G-code' : generated ? '2 · Regenerate G-code' : '2 · Generate G-code';
@@ -356,9 +372,11 @@ for (const id of fields) $(id).addEventListener('input', () => {
     project = readProject();
     $('writing-error').textContent = '';
     $('motion-error').textContent = '';
+    $('artwork-error').textContent = '';
   } catch (error) {
-    $('writing-error').textContent = writingEnabled ? `${error.message}. Preview shows the last valid layout.` : '';
-    $('motion-error').textContent = writingEnabled ? '' : `${error.message}. Canvas shows the last valid layout.`;
+    $('artwork-error').textContent = id.startsWith('artwork-') ? `${error.message}. Preview shows the last valid layout.` : '';
+    $('writing-error').textContent = writingEnabled && !id.startsWith('artwork-') ? `${error.message}. Preview shows the last valid layout.` : '';
+    $('motion-error').textContent = writingEnabled || id.startsWith('artwork-') ? '' : `${error.message}. Canvas shows the last valid layout.`;
   }
   render();
 });
@@ -487,8 +505,17 @@ $('svg-file').addEventListener('change', () => perform(async () => {
   const current = readProject();
   const nextProject = readProject({ ...(current.version === 2 ? { version: 2, texts: current.texts } : {}), artwork });
   project = nextProject;
+  fillArtwork();
   resetPreview();
   controller.message = `Imported ${artwork.name}. SVG outlines are centered on the work origin; review the layout, then generate G-code.`;
+  render();
+}));
+$('remove-svg').addEventListener('click', () => perform(() => {
+  // Keep valid text boxes even when the artwork placement draft is invalid.
+  const { artwork, ...rest } = layoutProject(project);
+  project = validateProject(rest);
+  fillArtwork(); resetPreview();
+  controller.message = 'SVG removed. Text boxes retained.';
   render();
 }));
 $('reset-artwork').addEventListener('click', () => perform(() => {
