@@ -49,6 +49,7 @@ npm run check
 npm test
 npm run test:svg
 npm run test:joypad
+npm run test:drawing
 ```
 
 The first two commands work without a graphical desktop. `test:svg` uses Electron and needs its platform libraries and a display session. Tests use simulated transports and fake serial ports; no robot is required.
@@ -70,7 +71,7 @@ After updating the checkout, run `git pull` followed by `npm ci` and the verific
 4. **Send:** click **Connect simulator**, then **Home simulator**, then **3 · Send to simulator**. The simulator executes the generated layout. Physical **Send to robot** remains unavailable pending firmware and calibration validation; exported G-code is not certified for physical use.
 5. Pause/resume at simulated command boundaries, or use **Stop simulation**. Stop disconnects the simulator and requires a fresh connection and home.
 6. Switch to **Control** for discrete XYZ jogging. **Use pen position** in Draw changes the project origin; it does not change firmware settings.
-7. Save a `.dexarm.json` project, then reopen it using **Open project**. Multi-text layouts use version 2 and retain individual text settings and positions alongside optional imported SVG. Older version 1 star, SVG, and writing projects still open; single writing is upgraded without changing its pen paths. Changes are held in memory until saved; there is no autosave. **Use star** replaces the complete layout; importing SVG replaces existing SVG while keeping text boxes.
+7. Save a `.dexarm.json` project, then reopen it using **Open project**. New layouts use version 3 with multiple SVG objects and text boxes. Version 1/2 files are upgraded when opened in the editor; core validation and compilation still support their original forms. **Undo/Redo** restores committed edits; valid changes also create a local recovery copy. **Restore recovery** reopens it after reload. **Use star** replaces the complete layout (undoable); importing SVG now **adds** an object alongside the existing ones.
 
 The command activity drawer shows the most recent 150 sent/received lines. The progress display counts acknowledged commands; simulation completes after its `M400` acknowledgement.
 
@@ -82,9 +83,19 @@ Set **Maximum speed at 100%** in mm/min (default 600), then use the **Speed** sl
 
 No new dependencies: the native Gamepad API works in supported Electron/browser environments. Check controller/OS compatibility locally; software tests use synthetic input. Run `npm run test:joypad` for the sandboxed Electron integration checks (graphical environment required). See [GitHub findings and integration decisions](docs/joypad-research.md).
 
-## SVG placement
+## Drawing layout tools
 
-After **Import SVG**, use **SVG placement** to set X/Y offsets relative to the work origin and rotation (−180…180°, positive counterclockwise). **Design size** scales the SVG with its proportions preserved. Placement affects preview, saved projects, bounds validation and G-code; text boxes retain their own positions. **Remove SVG** removes only the artwork, keeping your text. Replacing the SVG resets its offsets and rotation. One imported SVG is supported per layout.
+- Import several SVGs or insert a built-in Star, Heart, Flower, Circle, Rectangle or Arrow. Use **New empty layout** to start without the initial star.
+- Select an object on the canvas or in **Objects**. Drag SVG/text objects to move them; drag the selected SVG’s corner handle to scale from its center. Arrow keys move 1 mm; Shift moves 10 mm.
+- **SVG width/height** set exact dimensions in millimetres. Lock proportions for uniform scaling, or unlock for independent dimensions. Position, rotation, horizontal/vertical mirroring and deletion affect only the selected SVG.
+- Shift-click canvas objects or Ctrl/Cmd-click list entries to select several. Duplicate, delete, group/ungroup and align them. Groups move and align as units through these tools; numeric object fields still edit individual objects. Copies start at the same position with independent groups.
+- Under **Paths, fill and paper**, enable nearest-endpoint path optimization and/or even-odd hatching of closed SVG contours. Set spacing (0.5–20 mm) and angle (−180…180°). Holes remain empty; open paths and text are not hatched. Optimization never chooses a longer pen-up XY route than the original order from the work origin.
+- Choose an A4/A5/postcard/DL-envelope or custom paper guide, margins and center offsets. Out-of-margin paths show a warning; paper guides do not expand simulator bounds.
+- The canvas reports ink distance, XY pen-up travel, lift distance and an ideal motion-time estimate. This omits acceleration, communication delays and unknown initial approach, so it is not a completion-time prediction.
+- **Run boundary · simulator** traces the layout’s bounding rectangle at the configured pen-up height. Connect and home first. It never sends contact-height moves or physical USB commands.
+- **Undo/Redo** keeps up to 20 committed states within roughly 8 MiB. Dragging records one edit at release. Invalid drafts are not saved. Valid edits autosave after 500 ms; recovery includes used imported-font geometry. Browser storage can be unavailable or full; the status reports failure and project-file saving remains available. Autosave is local recovery, not a substitute for exported files.
+
+See [drawing editor behavior and hardware limits](docs/drawing-editor.md) and the [running DexArm hardware test ledger](docs/dexarm-hardware-tests.md). `npm run test:drawing` exercises the actual Electron editor with synthetic layout changes and the simulator.
 
 ## Curved working area
 
@@ -106,12 +117,12 @@ Choose **Pen path → Outline / Centerline** in the right-hand drawing menu. Eac
 
 **Font style** offers Regular, Bold, Italic, and Bold italic for DejaVu using actual font variants. Hershey has a fixed regular stroke style. Centerline follows the selected variant but cannot change the physical pen thickness. Some converted centerline glyphs are unavailable in each style (for example regular Serif `#`, `:`, `;`, and italic Sans `A`); the editor reports these explicitly and never substitutes outlines. Choose another style/font or Outline. See the complete table in [font provenance](assets/fonts/README.md). Converted serifs may use several strokes.
 
-- Letter height is the nominal capital height in millimeters (2–40 mm). Descenders and decorative strokes can extend beyond it. Writing uses its own letter height; the SVG Design size control is shown only when SVG artwork is present.
+- Letter height is the nominal capital height in millimeters (2–40 mm). Descenders and decorative strokes can extend beyond it. Writing uses its own letter height; SVG objects use their own width/height controls.
 - Letter spacing adds 0–10 mm between glyph advances. Line spacing sets baseline distance to 1–3 times the letter height. Multiline alignment is relative to the longest logical line.
 - Each logical text block is centered on its own X/Y offset from the work origin. Spaces and blank lines affect layout. Every pen stroke uses the project contact Z and configured pen lift (10 mm by default).
 - Supported input: English uppercase/lowercase letters, digits, ASCII punctuation, spaces, and line breaks. Maximum 20 text boxes, each up to 160 characters and 8 lines, subject to the combined 200-stroke/2,000-point job limit (including SVG). Unsupported characters are reported explicitly; they are never silently dropped. Shorten text, lower the height, or choose a simpler font when validation reports a limit.
 - Invalid edits leave the last valid canvas visible, show an inline explanation, and require successful G-code generation before Send is enabled. Text must also fit the illustrative workspace, including pen-up clearance.
-- Saving retains each box’s editable text, font, style, path mode, position, size, spacing, and alignment. Text boxes can share the layout with one imported SVG. Imported font geometry is saved once in the project, so reopening it on another machine needs no font installation. Set **Rotation** (−180…180°) to turn a box around its center; positive angles turn counterclockwise. **Duplicate** adds an independently editable copy at the same position; drag it or change its X/Y offsets. Rotated paths are used for preview, bounds validation, saved projects and generated G-code.
+- Saving retains each box’s editable text, font, style, path mode, position, size, spacing, and alignment. Text boxes can share the layout with multiple imported SVG objects. Imported font geometry is saved once in the project, so reopening it on another machine needs no font installation. Set **Rotation** (−180…180°) to turn a box around its center; positive angles turn counterclockwise. **Duplicate** adds an independently editable copy at the same position; drag it or change its X/Y offsets. Rotated paths are used for preview, bounds validation, saved projects and generated G-code.
 
 Writing execution remains simulated. USB diagnostics cannot send writing or other motion commands to a physical robot.
 
@@ -167,8 +178,8 @@ Tests use Node's built-in test runner, without third-party test dependencies. Th
 - Supported elements: `path`, `line`, `polyline`, `polygon`, unrounded `rect`, `circle`, `ellipse`, and groups.
 - Supported path commands: absolute/relative `M L H V C S Q T Z`, including implicit repeated coordinates and separate subpaths. SVG arc commands (`A`) are rejected; convert them to Bézier paths first.
 - Supported transforms: `matrix`, `translate`, `scale`, and `rotate`, including nested groups. Other transforms must be converted to a matrix first.
-- Geometry is centered on the project origin, SVG Y is flipped into machine Y, aspect ratio is retained, and the longest artwork dimension becomes **Design size**. Root width/height and viewBox whitespace do not set physical dimensions. Curves are approximated by line segments; this is not a physical accuracy guarantee.
-- This is an **outline plotter**, not a full SVG renderer. Fill, color, and stroke width do not create hatching or thick strokes. Text, images, references, styles/classes, clipping, masks, filters, dashes, markers, nested SVG viewports, and active content are rejected. Export a plain SVG with visible paths, converting text and arcs to Bézier paths.
+- Imported geometry is centered and SVG Y is flipped into machine Y. New SVGs start at 60 mm on their longest dimension; each object then has independent width, height, position, rotation and mirroring. Root width/height and viewBox whitespace do not set physical dimensions. Curves are approximated by line segments; this is not a physical accuracy guarantee.
+- This is a **path plotter**, not a full SVG renderer. SVG fill/color/stroke width do not automatically create thick strokes; optional editor hatching fills closed contours with an even-odd rule. Text, images, references, styles/classes, clipping, masks, filters, dashes, markers, nested SVG viewports, and active content are rejected. Export a plain SVG with visible paths, converting text and arcs to Bézier paths.
 - Limits: 256 KB input, 200 strokes, 2,000 flattened points, 1,000 XML elements, and 30 levels of nesting. Simplify complex artwork before importing.
 - Imported XML is parsed in a detached document. Original nodes are never inserted into the application; only numeric geometry is saved or drawn. Failed imports leave the current project unchanged.
 
@@ -184,6 +195,9 @@ src/core/              Device/job state and validated drawing projects
 src/core/gcode.js       Reviewed XYZ G-code import and modal-state normalization
 src/core/teach.js       Named sequence validation, repeat and tool-action compilation
 src/core/writing.js     Stroke-font lettering, multiline layout and validation
+src/core/drawing-plan.js  Hatching, travel optimization, metrics and raised boundary
+src/core/layout-actions.js  Multi-object movement, grouping, alignment and duplication
+src/core/drawing-presets.js  Original built-in drawing shapes
 src/core/font-data.js   Three bundled Hershey stroke fonts
 src/core/paired-font-data.js  DejaVu outline and centerline glyphs
 src/core/custom-font.js Validated portable custom font geometry

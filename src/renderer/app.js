@@ -1,7 +1,10 @@
+import { drawingMetrics, boundaryCommands } from '../core/drawing-plan.js';
+import { layoutObjects, objectBounds, combinedBounds, selectionIds, layoutAction } from '../core/layout-actions.js';
+import { DRAWING_PRESETS, presetArtwork } from '../core/drawing-presets.js';
 import { setupJoypad } from './joypad.js';
 import { penReachAtHeight } from '../core/workspace.js';
 import { Controller } from '../core/controller.js';
-import { defaultProject, validateProject, drawingStrokes, drawingCommands, layoutProject, textBounds } from '../core/project.js';
+import { defaultProject, validateProject, drawingStrokes, drawingCommands, upgradeLayout } from '../core/project.js';
 import { importSvg } from '../core/svg.js';
 import { parseGcode } from '../core/gcode.js';
 import { defaultSequence, validateSequence, sequenceCommands, sequencePoints } from '../core/teach.js';
@@ -13,7 +16,7 @@ const controller = new Controller();
 const usb = window.dexarmDevice;
 let usbState = { status: 'disconnected', busy: false, firmware: '', position: null, log: [], message: 'USB disconnected. Physical motion is disabled.' };
 let usbRefreshing = false;
-let project = defaultProject();
+let project = upgradeLayout(defaultProject());
 let writingEnabled = false;
 let customFonts = [];
 let fontBusy = false;
@@ -23,11 +26,23 @@ let importedJob = null;
 let sequence = defaultSequence();
 let taughtJob = null;
 let selectedText = null;
+let selectedArtwork = project.artworks[0]?.id || null;
+let selection = new Set(selectedArtwork ? [selectedArtwork] : []);
+let history = [JSON.stringify(project)];
+let historyIndex = 0;
+let autosaveTimer;
+let autosaveDirty = false;
+let recovery = null;
+try {
+  const saved = localStorage.getItem('dexarm-drawing-autosave');
+  if (saved && new Blob([saved]).size > MAX_PROJECT_BYTES) throw new Error('Stored layout exceeds 4 MB');
+  if (saved) recovery = upgradeLayout(JSON.parse(saved));
+} catch (error) { $('autosave-status').textContent = `Recovery could not be read: ${error.message}. Existing data was retained.`; }
 let dragging = null;
 let tab = 'draw';
 const joypad = setupJoypad(controller, () => tab === 'joypad');
 let lastLog = 0;
-const fields = ['project-name', 'size', 'feedrate', 'origin-x', 'origin-y', 'origin-z', 'writing-text', 'writing-font', 'writing-height', 'writing-letter-spacing', 'writing-line-spacing', 'writing-align', 'writing-mode-outline', 'writing-mode-centerline', 'writing-style', 'text-x', 'text-y', 'text-rotation', 'travel-feedrate', 'pen-lift', 'artwork-x', 'artwork-y', 'artwork-rotation'];
+const fields = ['project-name', 'size', 'feedrate', 'origin-x', 'origin-y', 'origin-z', 'writing-text', 'writing-font', 'writing-height', 'writing-letter-spacing', 'writing-line-spacing', 'writing-align', 'writing-mode-outline', 'writing-mode-centerline', 'writing-style', 'text-x', 'text-y', 'text-rotation', 'travel-feedrate', 'pen-lift', 'artwork-x', 'artwork-y', 'artwork-rotation', 'artwork-width', 'artwork-height', 'artwork-mirror-x', 'artwork-mirror-y', 'optimize-path', 'hatch-fill', 'hatch-spacing', 'hatch-angle', 'paper-width', 'paper-height', 'paper-margin', 'paper-x', 'paper-y'];
 const fontOptions = () => [...WRITING_FONTS, ...customFonts.map(({ id, name }) => ({ id, name: `${name} (imported)`, outline: true, custom: true }))];
 const active = () => ['running', 'pausing', 'paused'].includes(controller.state);
 const connected = () => !['disconnected', 'faulted', 'connecting'].includes(controller.state);
@@ -78,32 +93,27 @@ async function perform(action) {
 }
 
 function readProject(content) {
-  if (content === undefined) {
-    content = project.version === 2 ? { version: 2, texts: project.texts.map((text) => text.id !== selectedText ? text : {
-      id: text.id, x: $('text-x').valueAsNumber, y: $('text-y').valueAsNumber,
-      ...(text.rotation !== undefined || $('text-rotation').valueAsNumber !== 0 ? { rotation: $('text-rotation').valueAsNumber } : {}),
-      writing: {
-        text: $('writing-text').value, font: $('writing-font').value,
-        mode: $('writing-mode-outline').checked ? 'outline' : 'centerline', style: $('writing-style').value,
-        fontSize: $('writing-height').valueAsNumber, letterSpacing: $('writing-letter-spacing').valueAsNumber,
-        lineSpacing: $('writing-line-spacing').valueAsNumber, align: $('writing-align').value,
-      },
-    }), ...(project.artwork ? { artwork: project.artwork } : {}) } : project.artwork ? { artwork: project.artwork } : {};
-  }
-  if (content.artwork && content.artwork === project.artwork) {
-    const artwork = { ...content.artwork };
-    for (const key of ['x', 'y', 'rotation']) {
-      const value = $(`artwork-${key}`).valueAsNumber;
-      if (artwork[key] !== undefined || value !== 0) artwork[key] = value;
-    }
-    content = { ...content, artwork };
-  }
-  return validateProject({ version: 1, name: $('project-name').value,
-    size: $('size').valueAsNumber, feedrate: $('feedrate').valueAsNumber,
-    travelFeedrate: $('travel-feedrate').valueAsNumber, penLift: $('pen-lift').valueAsNumber,
+  let source = content || { ...project, texts: project.texts.map((text) => text.id !== selectedText ? text : {
+    ...text, x: $('text-x').valueAsNumber, y: $('text-y').valueAsNumber, rotation: $('text-rotation').valueAsNumber,
+    writing: { text: $('writing-text').value, font: $('writing-font').value,
+      mode: $('writing-mode-outline').checked ? 'outline' : 'centerline', style: $('writing-style').value,
+      fontSize: $('writing-height').valueAsNumber, letterSpacing: $('writing-letter-spacing').valueAsNumber,
+      lineSpacing: $('writing-line-spacing').valueAsNumber, align: $('writing-align').value },
+  }), artworks: project.artworks.map((artwork) => artwork.id !== selectedArtwork ? artwork : {
+    ...artwork, x: $('artwork-x').valueAsNumber, y: $('artwork-y').valueAsNumber,
+    rotation: $('artwork-rotation').valueAsNumber, width: $('artwork-width').valueAsNumber, height: $('artwork-height').valueAsNumber,
+    mirrorX: $('artwork-mirror-x').checked, mirrorY: $('artwork-mirror-y').checked,
+  }) };
+  source = { ...source, name: $('project-name').value, size: $('size').valueAsNumber,
+    feedrate: $('feedrate').valueAsNumber, travelFeedrate: $('travel-feedrate').valueAsNumber, penLift: $('pen-lift').valueAsNumber,
     origin: { x: $('origin-x').valueAsNumber, y: $('origin-y').valueAsNumber, z: $('origin-z').valueAsNumber },
-    ...content,
-    ...(customFonts.length ? { fonts: customFonts.filter((font) => content.writing?.font === font.id || content.texts?.some((text) => text.writing.font === font.id)) } : {}) });
+    options: { optimize: $('optimize-path').checked, hatch: $('hatch-fill').checked,
+      hatchSpacing: $('hatch-spacing').valueAsNumber, hatchAngle: $('hatch-angle').valueAsNumber },
+    fonts: customFonts.filter((font) => source.texts?.some((text) => text.writing.font === font.id)),
+  };
+  if ($('paper-preset').value !== 'none') source.paper = Object.fromEntries(['width', 'height', 'margin', 'x', 'y'].map((key) => [key, $(`paper-${key}`).valueAsNumber]));
+  else delete source.paper;
+  return validateProject(source);
 }
 
 function fillWriting() {
@@ -126,13 +136,18 @@ function fillWriting() {
 }
 
 function fillArtwork() {
-  for (const key of ['x', 'y', 'rotation']) $(`artwork-${key}`).value = project.artwork?.[key] ?? 0;
+  const artwork = project.artworks.find((object) => object.id === selectedArtwork);
+  for (const key of ['x', 'y', 'rotation', 'width', 'height']) $(`artwork-${key}`).value = Number((artwork?.[key] ?? 0).toFixed(3));
+  $('artwork-mirror-x').checked = artwork?.mirrorX || false;
+  $('artwork-mirror-y').checked = artwork?.mirrorY || false;
   $('artwork-error').textContent = '';
 }
 
 function fillProject() {
-  if (project.writing) project = layoutProject(project);
+  project = upgradeLayout(project);
   selectedText = project.texts?.[0]?.id || null;
+  selectedArtwork = selectedText ? null : project.artworks[0]?.id || null;
+  selection = new Set([selectedText || selectedArtwork].filter(Boolean));
   $('project-name').value = project.name;
   $('size').value = project.size;
   $('feedrate').value = project.feedrate;
@@ -140,37 +155,45 @@ function fillProject() {
   $('pen-lift').value = project.penLift ?? 10;
   $('motion-error').textContent = '';
   for (const axis of ['x', 'y', 'z']) $(`origin-${axis}`).value = project.origin[axis];
+  $('optimize-path').checked = project.options?.optimize || false;
+  $('hatch-fill').checked = project.options?.hatch || false;
+  $('hatch-spacing').value = project.options?.hatchSpacing ?? 2;
+  $('hatch-angle').value = project.options?.hatchAngle ?? 0;
+  $('paper-preset').value = project.paper ? 'custom' : 'none';
+  for (const [key, fallback] of Object.entries({ width: 210, height: 297, margin: 10, x: 0, y: 0 })) $(`paper-${key}`).value = project.paper?.[key] ?? fallback;
   fillWriting();
   fillArtwork();
 }
 
-function selectText(id) {
+function selectObjects(ids) {
   project = readProject();
-  selectedText = id;
-  fillWriting();
-  render();
+  selection = new Set(selectionIds(project, ids));
+  selectedText = project.texts.find((object) => selection.has(object.id))?.id || null;
+  selectedArtwork = project.artworks.find((object) => selection.has(object.id))?.id || null;
+  fillWriting(); fillArtwork(); render();
 }
-
+function selectText(id) { selectObjects([id]); }
 function drawTextBoxes() {
   const svg = (name) => document.createElementNS('http://www.w3.org/2000/svg', name);
-  $('text-boxes').replaceChildren(...(project.texts || []).map((text, index) => {
-    const bounds = textBounds(text, project.origin, project.fonts);
+  $('text-boxes').replaceChildren(...layoutObjects(project).map((object) => {
+    const bounds = objectBounds(project, object);
     const [x, y] = screenPoint({ x: bounds.left, y: bounds.top });
     const group = svg('g');
-    group.dataset.textId = text.id;
-    group.setAttribute('role', 'button');
-    group.setAttribute('tabindex', active() || controller.busy || fontBusy ? '-1' : '0');
-    group.setAttribute('aria-label', `Text ${index + 1}: ${text.writing.text}. Select to edit; drag or use arrow keys to move.`);
-    group.setAttribute('aria-pressed', String(selectedText === text.id));
-    group.setAttribute('aria-disabled', String(active() || controller.busy || controller.state === 'connecting' || fontBusy));
-    group.classList.add('text-box');
-    if (selectedText === text.id) group.classList.add('selected');
-    const rect = svg('rect');
-    rect.setAttribute('x', x - 6); rect.setAttribute('y', y - 6);
-    rect.setAttribute('width', Math.max(12, (bounds.right - bounds.left) * DRAW_SCALE + 12));
-    rect.setAttribute('height', Math.max(12, (bounds.top - bounds.bottom) * DRAW_SCALE + 12));
-    rect.setAttribute('rx', '3');
-    group.append(rect);
+    group.dataset.objectId = object.id;
+    group.setAttribute('role', 'button'); group.setAttribute('tabindex', active() || controller.busy || fontBusy ? '-1' : '0');
+    group.setAttribute('aria-label', `${object.writing ? 'Text: ' + object.writing.text : 'SVG: ' + object.name}. Select and drag; Shift-click for multiple selection.`);
+    group.setAttribute('aria-pressed', String(selection.has(object.id)));
+    group.classList.add('text-box'); if (selection.has(object.id)) group.classList.add('selected');
+    const rect = svg('rect'); rect.setAttribute('x', x - 6); rect.setAttribute('y', y - 6);
+    const width = Math.max(12, (bounds.right - bounds.left) * DRAW_SCALE + 12);
+    const height = Math.max(12, (bounds.top - bounds.bottom) * DRAW_SCALE + 12);
+    rect.setAttribute('width', width); rect.setAttribute('height', height); rect.setAttribute('rx', '3'); group.append(rect);
+    if (!object.writing && selection.has(object.id) && selection.size === 1) {
+      const handle = svg('rect'); handle.setAttribute('x', x + width - 11); handle.setAttribute('y', y + height - 11);
+      handle.setAttribute('width', '10'); handle.setAttribute('height', '10'); handle.classList.add('resize-handle');
+      handle.dataset.resize = object.id;
+      const title = svg('title'); title.textContent = 'Drag to scale SVG from its center'; handle.append(title); group.append(handle);
+    }
     return group;
   }));
 }
@@ -197,6 +220,7 @@ $('show-reach').addEventListener('change', drawReach);
 
 function draw() {
   drawReach();
+  drawPaperAndMetrics();
   if (tab === 'joypad') {
     $('drawing-path').setAttribute('d', ''); $('travel-path').setAttribute('d', '');
     $('origin-marker').setAttribute('hidden', ''); $('job-endpoints').setAttribute('hidden', '');
@@ -219,13 +243,11 @@ function draw() {
   $('travel-path').setAttribute('d', travel.join(' '));
   $('pen-marker').toggleAttribute('hidden', !controller.position);
   if (controller.position) $('pen-marker').setAttribute('transform', `translate(${from.join(' ')})`);
-  const boxes = project.texts || [];
-  $('drawing-dimensions').textContent = boxes.length ? `${boxes.length} text box${boxes.length === 1 ? '' : 'es'} · ${project.feedrate} mm/min` : project.version === 2 && !project.artwork ? 'Empty layout · insert text' : `${project.size} mm design · ${project.feedrate} mm/min`;
-  const artworkName = boxes.length ? `${boxes.length} editable text box${boxes.length === 1 ? '' : 'es'}${project.artwork ? ` + ${project.artwork.name}` : ''}` : project.artwork?.name || (project.version === 2 ? 'Empty layout · insert text' : 'Built-in star');
-  $('artwork-name').textContent = artworkName;
-  $('artwork-details').textContent = `${strokes.length} stroke${strokes.length === 1 ? '' : 's'} · ${strokes.reduce((sum, stroke) => sum + stroke.length, 0)} points`;
-  $('canvas-description').textContent = `${artworkName} with ${strokes.length} separate pen strokes. Select text boxes to edit or move them. Limits are illustrative, not verified DexArm limits.`;
-  if (!dragging) drawTextBoxes();
+  $('drawing-dimensions').textContent = `${project.artworks.length} SVG · ${project.texts.length} text · ${project.feedrate} mm/min`;
+  $('artwork-name').textContent = `${project.artworks.length} SVG object${project.artworks.length === 1 ? '' : 's'} + ${project.texts.length} text box${project.texts.length === 1 ? '' : 'es'}`;
+  $('artwork-details').textContent = `${strokes.length} strokes · ${strokes.reduce((sum, stroke) => sum + stroke.length, 0)} points`;
+  $('canvas-description').textContent = 'Editable drawing objects. Drag objects or SVG corner handles; Shift-click to select multiple objects. Limits are illustrative.';
+  drawTextBoxes();
 }
 
 function drawJob() {
@@ -247,6 +269,7 @@ function drawJob() {
 }
 
 function render() {
+  recordDrawingHistory();
   const ready = controller.state === 'ready' && !controller.busy && !fontBusy;
   const reviewed = tab === 'gcode' ? importedJob : tab === 'teach' ? taughtJob : generated;
   const locked = active() || controller.busy || controller.state === 'connecting' || fontBusy;
@@ -261,9 +284,9 @@ function render() {
   for (const axis of ['x', 'y', 'z']) $(`pos-${axis}`).textContent = controller.position ? controller.position[axis].toFixed(2) : '—';
   for (const id of fields) $(id).disabled = locked;
   $('text-boxes').toggleAttribute('hidden', tab !== 'draw');
-  $('size').disabled = locked || (project.version === 2 && !project.artwork);
-  $('design-size-field').hidden = project.version === 2 && !project.artwork;
-  $('artwork-editor').hidden = !project.artwork;
+  $('size').disabled = true;
+  $('design-size-field').hidden = true;
+  $('artwork-editor').hidden = !selectedArtwork;
   $('writing-editor').hidden = !writingEnabled;
   $('write-text').disabled = locked;
   $('delete-text').disabled = locked;
@@ -296,8 +319,8 @@ function render() {
   $('open').disabled = locked;
   $('import-svg').disabled = locked;
   $('remove-svg').disabled = locked;
-  $('reset-artwork').disabled = locked || (!project.artwork && project.version !== 2);
-  $('preview').disabled = locked || (tab === 'draw' && project.version === 2 && !project.texts.length && !project.artwork);
+  $('reset-artwork').disabled = locked;
+  $('preview').disabled = locked || (tab === 'draw' && !project.texts.length && !project.artworks.length);
   $('preview').textContent = tab === 'gcode' ? '2 · Review G-code' : tab === 'teach' ? '2 · Generate sequence G-code' : generated ? '2 · Regenerate G-code' : '2 · Generate G-code';
   $('workflow-title').textContent = tab === 'gcode' ? 'Source → Review → Simulate' : tab === 'teach' ? 'Sequence → G-code → Play' : 'Layout → G-code → Send';
   $('canvas-tool').textContent = tab === 'joypad' ? 'JOYPAD · SIMULATOR' : tab === 'gcode' ? 'XYZ MOTION' : tab === 'teach' ? sequence.tool.toUpperCase() : 'PEN TOOL';
@@ -339,6 +362,7 @@ function render() {
     $('log').scrollTop = $('log').scrollHeight;
     lastLog = controller.log.length;
   }
+  renderDrawingTools(locked, ready);
   renderJobEditors(ready, locked);
   joypad.refresh();
   draw();
@@ -376,6 +400,13 @@ $('use-position').addEventListener('click', () => perform(() => {
   render();
 }));
 for (const id of fields) $(id).addEventListener('input', () => {
+  if (id.startsWith('paper-')) $('paper-preset').value = 'custom';
+  if (['artwork-width', 'artwork-height'].includes(id) && $('artwork-lock').checked) {
+    const object = project.artworks.find((item) => item.id === selectedArtwork);
+    const key = id === 'artwork-width' ? 'width' : 'height', other = key === 'width' ? 'height' : 'width';
+    if (object?.[key]) $(`artwork-${other}`).value = object[other] * $(id).valueAsNumber / object[key];
+  }
+
   if (id === 'writing-font' && fontOptions().find((font) => font.id === $('writing-font').value)?.custom) $('writing-style').value = 'regular';
   if (id === 'writing-font' && !fontOptions().find((font) => font.id === $('writing-font').value)?.outline) {
     $('writing-mode-centerline').checked = true;
@@ -387,7 +418,9 @@ for (const id of fields) $(id).addEventListener('input', () => {
     $('writing-error').textContent = '';
     $('motion-error').textContent = '';
     $('artwork-error').textContent = '';
+    $('layout-error').textContent = '';
   } catch (error) {
+    $('layout-error').textContent = !id.startsWith('writing-') && !id.startsWith('text-') && !id.startsWith('artwork-') ? error.message : '';
     $('artwork-error').textContent = id.startsWith('artwork-') ? `${error.message}. Preview shows the last valid layout.` : '';
     $('writing-error').textContent = writingEnabled && !id.startsWith('artwork-') ? `${error.message}. Preview shows the last valid layout.` : '';
     $('motion-error').textContent = writingEnabled || id.startsWith('artwork-') ? '' : `${error.message}. Canvas shows the last valid layout.`;
@@ -415,7 +448,7 @@ document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListe
   const descriptions = { draw: 'Create your layout, generate G-code, then send the checked job.', control: 'Move to coordinates or jog the simulator. USB diagnostics stay separate.', gcode: 'Open or paste XYZ G-code, review the path, then simulate.', teach: 'Record points, arrange actions, and replay a repeatable sequence.', joypad: 'Use a game controller to jog the simulator. Hold to move; release to stop issuing steps.' };
   $('page-title').textContent = titles[tab];
   $('page-description').textContent = descriptions[tab];
-  $('canvas-instructions').textContent = tab === 'joypad' ? 'Live simulator pen position. Left stick: XY; right stick: Z. Hold RB/R1 to jog. Height is shown in Device. No collision simulation.' : tab === 'gcode' ? 'Green: first point. Amber: last point. Top view only; initial approach and Z motion are not shown.' : tab === 'teach' ? 'Move directly between recorded points. Add explicit lift points for clearance. Green: first point; amber: last point. No collision simulation.' : tab === 'control' ? 'Jog or move to explicit XYZ coordinates. The drawing is shown for reference; manual moves do not change it.' : 'Insert text, click a box to edit it, then drag it into place. Arrow keys move the selected box 1 mm; Shift moves 10 mm.';
+  $('canvas-instructions').textContent = tab === 'joypad' ? 'Live simulator pen position. Left stick: XY; right stick: Z. Hold RB/R1 to jog. Height is shown in Device. No collision simulation.' : tab === 'gcode' ? 'Green: first point. Amber: last point. Top view only; initial approach and Z motion are not shown.' : tab === 'teach' ? 'Move directly between recorded points. Add explicit lift points for clearance. Green: first point; amber: last point. No collision simulation.' : tab === 'control' ? 'Jog or move to explicit XYZ coordinates. The drawing is shown for reference; manual moves do not change it.' : 'Drag objects or SVG corner handles. Shift-click or use the object list for multiple selection. Arrow keys move the selection 1 mm; Shift moves 10 mm.';
   $('path-legend').textContent = ['gcode', 'teach'].includes(tab) ? 'Linear XYZ motion (top view)' : 'Drawing path';
   $('travel-legend').textContent = tab === 'gcode' ? 'Source G0 travel' : tab === 'teach' ? 'No implicit pen lift' : 'Pen-up travel';
   render();
@@ -512,66 +545,34 @@ $('font-file').addEventListener('change', () => perform(async () => {
 }));
 $('import-svg').addEventListener('click', () => $('svg-file').click());
 $('svg-file').addEventListener('change', () => perform(async () => {
-  const file = $('svg-file').files[0];
-  $('svg-file').value = '';
+  const file = $('svg-file').files[0]; $('svg-file').value = '';
   if (!file) return;
   if (file.size > 262144) throw new Error('SVG files must be smaller than 256 KB');
-  const artwork = importSvg(await file.text(), file.name);
-  if (active() || controller.busy || controller.state === 'connecting' || fontBusy) throw new Error('Wait for the current operation before importing artwork');
-  const current = readProject();
-  const nextProject = readProject({ ...(current.version === 2 ? { version: 2, texts: current.texts } : {}), artwork });
-  project = nextProject;
-  fillArtwork();
-  resetPreview();
-  controller.message = `Imported ${artwork.name}. SVG outlines are centered on the work origin; review the layout, then generate G-code.`;
-  render();
+  const raw = importSvg(await file.text(), file.name);
+  if (drawingLocked()) throw new Error('Wait for the current operation before importing artwork');
+  addArtwork(raw);
 }));
-$('remove-svg').addEventListener('click', () => perform(() => {
-  // Keep valid text boxes even when the artwork placement draft is invalid.
-  const { artwork, ...rest } = layoutProject(project);
-  project = validateProject(rest);
-  fillArtwork(); resetPreview();
-  controller.message = 'SVG removed. Text boxes retained.';
-  render();
-}));
+$('remove-svg').addEventListener('click', () => perform(() => actOnObjects('delete', [selectedArtwork])));
 $('reset-artwork').addEventListener('click', () => perform(() => {
-  project = readProject({});
-  selectedText = null; fillWriting();
-  resetPreview();
-  controller.message = 'Built-in star restored. Generate G-code before sending.';
-  render();
+  project = upgradeLayout({ ...defaultProject(), name: project.name, origin: project.origin });
+  fillProject(); resetPreview(); render();
 }));
 $('write-text').addEventListener('click', () => perform(() => {
-  const current = layoutProject(readProject());
+  const current = upgradeLayout(readProject());
   const previous = current.texts.find((text) => text.id === selectedText);
   const id = crypto.randomUUID();
   const text = { id, x: previous?.x || 0, y: previous ? previous.y - previous.writing.fontSize * 2 : 0,
     writing: { ...defaultWriting(), text: 'New text', font: 'dejavu-sans', mode: 'centerline', style: 'regular' } };
   project = validateProject({ ...current, texts: [...current.texts, text] });
-  selectedText = id;
-  fillWriting(); resetPreview();
+  selectedText = id; selectedArtwork = null; selection = new Set([id]);
+  fillWriting(); fillArtwork(); resetPreview();
   controller.message = 'Text inserted. Drag its box to position it, or edit settings on the right. Insert text again to add another box.';
   render();
   $('writing-text').focus(); $('writing-text').select();
 }));
 $('text-list').addEventListener('change', () => perform(() => selectText($('text-list').value)));
-$('duplicate-text').addEventListener('click', () => perform(() => {
-  const current = readProject();
-  const original = current.texts.find((text) => text.id === selectedText);
-  if (!original) throw new Error('Select a text box to duplicate');
-  const copy = { ...original, id: crypto.randomUUID() };
-  project = validateProject({ ...current, texts: [...current.texts, copy] });
-  selectedText = copy.id;
-  fillWriting(); resetPreview();
-  controller.message = 'Text duplicated at the same position. Drag the selected copy or change its X/Y offsets.';
-  render();
-}));
-$('delete-text').addEventListener('click', () => perform(() => {
-  // Delete the selected box even when its draft text is invalid.
-  project = validateProject({ ...project, texts: project.texts.filter((text) => text.id !== selectedText) });
-  selectedText = project.texts[0]?.id || null;
-  fillWriting(); resetPreview(); render();
-}));
+$('duplicate-text').addEventListener('click', () => perform(() => actOnObjects('duplicate', [selectedText])));
+$('delete-text').addEventListener('click', () => perform(() => actOnObjects('delete', [selectedText])));
 $('download-gcode').addEventListener('click', () => perform(() => {
   const job = tab === 'gcode' ? importedJob : tab === 'teach' ? taughtJob : generated;
   if (!job) throw new Error('Generate or review G-code first');
@@ -586,62 +587,50 @@ function canvasPoint(event) {
   const point = new DOMPoint(event.clientX, event.clientY).matrixTransform($('workspace').getScreenCTM().inverse());
   return { x: (point.x - 380) / DRAW_SCALE, y: 130 + (495 - point.y) / DRAW_SCALE };
 }
-function moveText(id, x, y) {
-  const next = validateProject({ ...readProject(), texts: project.texts.map((text) => text.id === id ? { ...text, x, y } : text) });
-  project = next;
-  $('text-x').value = x; $('text-y').value = y;
-  $('writing-error').textContent = '';
-  resetPreview(); render();
-}
 $('text-boxes').addEventListener('pointerdown', (event) => {
-  const target = event.target.closest('[data-text-id]');
-  if (tab !== 'draw' || fontBusy || !target || event.button !== 0 || active() || controller.busy || controller.state === 'connecting') return;
+  const target = event.target.closest('[data-object-id]');
+  if (tab !== 'draw' || drawingLocked() || !target || event.button !== 0) return;
   perform(() => {
-    selectText(target.dataset.textId);
-    const text = project.texts.find((text) => text.id === selectedText);
-    dragging = { id: text.id, start: canvasPoint(event), x: text.x, y: text.y };
-    $('workspace').setPointerCapture(event.pointerId);
-    event.preventDefault();
+    const id = target.dataset.objectId;
+    if (event.shiftKey) { selectObjects(selection.has(id) ? [...selection].filter((item) => item !== id) : [...selection, id]); return; }
+    if (!selection.has(id)) selectObjects([id]); else project = readProject();
+    dragging = { project, ids: [...selection], start: canvasPoint(event), resize: event.target.closest('[data-resize]')?.dataset.resize };
+    $('workspace').setPointerCapture(event.pointerId); event.preventDefault();
   });
 });
 $('workspace').addEventListener('pointermove', (event) => {
   if (!dragging) return;
   const point = canvasPoint(event);
-  const x = Math.round((dragging.x + point.x - dragging.start.x) * 10) / 10;
-  const y = Math.round((dragging.y + point.y - dragging.start.y) * 10) / 10;
-  try { moveText(dragging.id, x, y); drawTextBoxes(); }
-  catch (error) { $('writing-error').textContent = `${error.message}. Last valid position retained.`; }
+  try {
+    if (dragging.resize) {
+      const object = dragging.project.artworks.find((item) => item.id === dragging.resize);
+      const center = { x: project.origin.x + object.x, y: project.origin.y + object.y };
+      const initial = Math.hypot(dragging.start.x - center.x, dragging.start.y - center.y);
+      const factor = Math.max(0.05, Math.hypot(point.x - center.x, point.y - center.y) / Math.max(initial, .01));
+      project = validateProject({ ...dragging.project, artworks: dragging.project.artworks.map((item) => item.id === object.id ? { ...item, width: object.width * factor, height: object.height * factor } : item) });
+    } else project = layoutAction(dragging.project, dragging.ids, { type: 'move', dx: point.x - dragging.start.x, dy: point.y - dragging.start.y }).project;
+    fillWriting(); fillArtwork(); resetPreview(); render();
+  } catch (error) { $('layout-error').textContent = `${error.message}. Last valid position retained.`; }
 });
 function endDrag(event) {
   if (!dragging) return;
   dragging = null;
   if ($('workspace').hasPointerCapture(event.pointerId)) $('workspace').releasePointerCapture(event.pointerId);
-  drawTextBoxes();
+  render();
 }
 $('workspace').addEventListener('pointerup', endDrag);
 $('workspace').addEventListener('pointercancel', endDrag);
-$('text-boxes').addEventListener('click', (event) => {
-  const box = event.target.closest('[data-text-id]');
-  if (tab === 'draw' && !fontBusy && box && !active() && !controller.busy) perform(() => selectText(box.dataset.textId));
-});
 $('text-boxes').addEventListener('keydown', (event) => {
-  const box = event.target.closest('[data-text-id]');
-  if (tab !== 'draw' || fontBusy || !box || active() || controller.busy || controller.state === 'connecting') return;
-  if (['Enter', ' '].includes(event.key)) {
-    event.preventDefault(); perform(() => {
-      selectText(box.dataset.textId);
-      $('text-boxes').querySelector(`[data-text-id="${selectedText}"]`).focus();
-    });
-  }
+  const target = event.target.closest('[data-object-id]');
+  if (tab !== 'draw' || drawingLocked() || !target) return;
+  if (['Enter', ' '].includes(event.key)) { event.preventDefault(); perform(() => selectObjects([target.dataset.objectId])); return; }
   const directions = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
   if (!directions[event.key]) return;
-  event.preventDefault();
-  perform(() => {
-    selectText(box.dataset.textId);
-    const text = project.texts.find((text) => text.id === selectedText);
-    const [dx, dy] = directions[event.key]; const step = event.shiftKey ? 10 : 1;
-    moveText(text.id, text.x + dx * step, text.y + dy * step);
-    $('text-boxes').querySelector(`[data-text-id="${text.id}"]`).focus();
+  event.preventDefault(); perform(() => {
+    if (!selection.has(target.dataset.objectId)) selectObjects([target.dataset.objectId]);
+    const [dx, dy] = directions[event.key], step = event.shiftKey ? 10 : 1;
+    actOnObjects('move', [...selection], { dx: dx * step, dy: dy * step });
+    $('text-boxes').querySelector(`[data-object-id="${target.dataset.objectId}"]`)?.focus();
   });
 });
 $('open').addEventListener('click', () => $('project-file').click());
@@ -652,7 +641,7 @@ $('project-file').addEventListener('change', () => perform(async () => {
   if (file.size > MAX_PROJECT_BYTES) throw new Error('Project files must be smaller than 4 MB');
   const nextProject = validateProject(JSON.parse(await file.text()));
   if (active() || controller.busy || fontBusy) throw new Error('Wait for the current operation before opening a project');
-  project = nextProject;
+  project = upgradeLayout(nextProject);
   customFonts = project.fonts || [];
   fillFontOptions();
   resetPreview();
@@ -867,6 +856,135 @@ $('teach-file').addEventListener('change', () => perform(async () => {
   sequence = next; taughtJob = null; fillSequence(); render();
 }));
 fillSequence();
+function drawingLocked() { return active() || controller.busy || controller.state === 'connecting' || fontBusy; }
+function recordDrawingHistory() {
+  const json = JSON.stringify(project);
+  if (history[historyIndex] === json || dragging) return;
+  history = history.slice(0, historyIndex + 1); history.push(json);
+  while (history.length > 20 || (history.length > 1 && history.reduce((sum, entry) => sum + entry.length, 0) > 8 * 1024 * 1024)) history.shift();
+  historyIndex = history.length - 1;
+  scheduleRecovery(json);
+}
+function writeRecovery(json) {
+  try {
+    if (new Blob([json]).size > MAX_PROJECT_BYTES) throw new Error('Layout exceeds the 4 MB recovery limit');
+    const saved = validateProject(JSON.parse(json));
+    localStorage.setItem('dexarm-drawing-autosave', json);
+    recovery = saved; autosaveDirty = false;
+    $('autosave-status').textContent = 'Recovery copy saved locally';
+  } catch (error) { $('autosave-status').textContent = `Recovery unavailable: ${error.message}. Save a project file.`; }
+}
+function scheduleRecovery(json) {
+  clearTimeout(autosaveTimer); autosaveDirty = true;
+  $('autosave-status').textContent = 'Saving recovery copy…';
+  autosaveTimer = setTimeout(() => writeRecovery(json), 500);
+}
+window.addEventListener('pagehide', () => {
+  if (autosaveDirty) { clearTimeout(autosaveTimer); writeRecovery(JSON.stringify(project)); }
+});
+
+function restoreDrawing(value) {
+  project = upgradeLayout(value);
+  customFonts = project.fonts || [];
+  fillFontOptions(); fillProject(); resetPreview(); render();
+  scheduleRecovery(JSON.stringify(project));
+}
+function actOnObjects(type, ids = [...selection], extra = {}) {
+  if (drawingLocked()) throw new Error('Wait for the current operation');
+  const result = layoutAction(type === 'delete' ? project : readProject(), ids.filter(Boolean), { type, ...extra });
+  project = result.project; selection = new Set(result.selection);
+  selectedText = project.texts.find((object) => selection.has(object.id))?.id || null;
+  selectedArtwork = project.artworks.find((object) => selection.has(object.id))?.id || null;
+  fillWriting(); fillArtwork(); resetPreview();
+  $('layout-error').textContent = '';
+  controller.message = type === 'duplicate' ? 'Copies created at the same position. Drag the selected copies into place.' : 'Layout updated. Generate G-code before sending.';
+  render();
+}
+function addArtwork(raw) {
+  const current = readProject();
+  const points = raw.strokes.flat();
+  const xs = points.map((point) => point.x), ys = points.map((point) => point.y);
+  const left = Math.min(...xs), right = Math.max(...xs), bottom = Math.min(...ys), top = Math.max(...ys);
+  const object = { ...raw, id: crypto.randomUUID(), x: 0, y: 0, rotation: 0,
+    width: (right - left) * 60, height: (top - bottom) * 60, mirrorX: false, mirrorY: false };
+  project = validateProject({ ...current, artworks: [...current.artworks, object] });
+  selectedArtwork = object.id; selectedText = null; selection = new Set([object.id]);
+  fillArtwork(); fillWriting(); resetPreview(); render();
+}
+function renderDrawingTools(locked, ready) {
+  $('drawing-edit-toolbar').hidden = tab !== 'draw';
+  $('drawing-metrics').hidden = tab !== 'draw';
+  $('paper-overlay').toggleAttribute('hidden', tab !== 'draw' || !project.paper);
+  const objects = layoutObjects(project);
+  selection = new Set([...selection].filter((id) => objects.some((object) => object.id === id)));
+  $('object-list').replaceChildren(...objects.map((object) => {
+    const option = document.createElement('option'); option.value = object.id;
+    option.textContent = `${object.writing ? 'Text: ' + object.writing.text.replace(/\n/g, ' ').slice(0, 22) : 'SVG: ' + object.name}${object.group ? ' · grouped' : ''}`;
+    option.selected = selection.has(object.id); return option;
+  }));
+  for (const id of ['object-list', 'preset-shape', 'preset-add', 'empty-layout', 'paper-preset', 'artwork-lock', 'align-choice']) $(id).disabled = locked;
+  for (const id of ['selection-duplicate', 'selection-delete', 'selection-ungroup', 'align-apply']) $(id).disabled = locked || !selection.size;
+  $('selection-group').disabled = locked || selection.size < 2;
+  $('undo-layout').disabled = locked || historyIndex <= 0;
+  $('redo-layout').disabled = locked || historyIndex >= history.length - 1;
+  $('restore-autosave').disabled = locked || !recovery;
+  $('boundary-run').disabled = !ready || (!project.texts.length && !project.artworks.length);
+  $('paper-fields').hidden = $('paper-preset').value === 'none';
+  $('selected-svg-name').textContent = project.artworks.find((object) => object.id === selectedArtwork)?.name || '';
+}
+function drawPaperAndMetrics() {
+  $('paper-overlay').toggleAttribute('hidden', tab !== 'draw' || !project.paper);
+  if (project.paper) {
+    const paper = project.paper;
+    const [x, y] = screenPoint({ x: project.origin.x + paper.x - paper.width / 2, y: project.origin.y + paper.y + paper.height / 2 });
+    for (const [id, inset] of [['paper-page', 0], ['paper-margin-guide', paper.margin]]) {
+      const rect = $(id); rect.setAttribute('x', x + inset * DRAW_SCALE); rect.setAttribute('y', y + inset * DRAW_SCALE);
+      rect.setAttribute('width', (paper.width - inset * 2) * DRAW_SCALE); rect.setAttribute('height', (paper.height - inset * 2) * DRAW_SCALE);
+    }
+  }
+  if (tab !== 'draw') return;
+  const strokes = drawingStrokes(project);
+  const metrics = drawingMetrics(strokes, project.origin, project.feedrate, project.travelFeedrate ?? project.feedrate, project.penLift ?? 10);
+  $('drawing-metrics').textContent = `Ink ${metrics.drawDistance.toFixed(1)} mm · Pen-up XY ${metrics.travelDistance.toFixed(1)} mm · Lifts ${metrics.liftDistance.toFixed(1)} mm · Estimated motion ${(metrics.seconds / 60).toFixed(1)} min. Assumes start at work origin; excludes acceleration, initial approach and communication delays.`;
+  let warning = '';
+  if (project.paper) {
+    const paper = project.paper, cx = project.origin.x + paper.x, cy = project.origin.y + paper.y;
+    if (strokes.flat().some((p) => Math.abs(p.x - cx) > paper.width / 2 - paper.margin || Math.abs(p.y - cy) > paper.height / 2 - paper.margin)) warning = 'Some drawing paths extend beyond the paper margins. Paper guides do not change simulator limits.';
+  }
+  $('paper-warning').textContent = warning;
+}
+$('undo-layout').addEventListener('click', () => { if (historyIndex > 0 && !drawingLocked()) restoreDrawing(JSON.parse(history[--historyIndex])); });
+$('redo-layout').addEventListener('click', () => { if (historyIndex < history.length - 1 && !drawingLocked()) restoreDrawing(JSON.parse(history[++historyIndex])); });
+$('restore-autosave').addEventListener('click', () => perform(() => { if (recovery) restoreDrawing(recovery); }));
+window.addEventListener('keydown', (event) => {
+  if (tab !== 'draw' || drawingLocked() || !(event.ctrlKey || event.metaKey) || /INPUT|TEXTAREA|SELECT/.test(event.target.tagName)) return;
+  if (event.key.toLowerCase() === 'z' || event.key.toLowerCase() === 'y') {
+    event.preventDefault(); $(event.shiftKey || event.key.toLowerCase() === 'y' ? 'redo-layout' : 'undo-layout').click();
+  }
+});
+$('object-list').addEventListener('change', () => perform(() => selectObjects([...$('object-list').selectedOptions].map((option) => option.value))));
+for (const [id, action] of [['selection-duplicate', 'duplicate'], ['selection-delete', 'delete'], ['selection-group', 'group'], ['selection-ungroup', 'ungroup']]) $(id).addEventListener('click', () => perform(() => actOnObjects(action)));
+$('align-apply').addEventListener('click', () => perform(() => { const [axis, edge] = $('align-choice').value.split(':'); actOnObjects('align', [...selection], { axis, edge }); }));
+$('preset-add').addEventListener('click', () => perform(() => addArtwork(presetArtwork($('preset-shape').value))));
+$('empty-layout').addEventListener('click', () => perform(() => { project = validateProject({ ...readProject(), texts: [], artworks: [] }); selectedText = selectedArtwork = null; selection.clear(); fillWriting(); fillArtwork(); resetPreview(); render(); }));
+$('boundary-run').addEventListener('click', () => perform(async () => {
+  project = readProject();
+  const commands = boundaryCommands(drawingStrokes(project), project.origin, project.travelFeedrate ?? project.feedrate, project.penLift ?? 10);
+  // Validate the entire raised path before simulator execution.
+  parseGcode(commands.join('\n'));
+  await controller.execute(commands, 'Raised boundary preview');
+}));
+$('paper-preset').addEventListener('change', () => {
+  const sizes = { a4: [210, 297], a5: [148, 210], postcard: [148, 105], envelope: [220, 110] };
+  if (sizes[$('paper-preset').value]) {
+    const [width, height] = sizes[$('paper-preset').value]; $('paper-width').value = width; $('paper-height').value = height;
+    $('paper-margin').value = 10; $('paper-x').value = $('paper-y').value = 0;
+  }
+  try { project = readProject(); $('layout-error').textContent = ''; resetPreview(); } catch (error) { $('layout-error').textContent = error.message; }
+  render();
+});
+for (const name of DRAWING_PRESETS) { const option = document.createElement('option'); option.value = option.textContent = name; $('preset-shape').append(option); }
+
 function fillFontOptions() {
   const selected = $('writing-font').value;
   $('writing-font').replaceChildren(...fontOptions().map(({ id, name, outline }) => {
