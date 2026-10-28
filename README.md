@@ -73,6 +73,12 @@ After updating the checkout, run `git pull` followed by `npm ci` and the verific
 
 The command activity drawer shows the most recent 150 sent/received lines. The progress display counts acknowledged commands; simulation completes after its `M400` acknowledgement.
 
+## Curved working area
+
+The Draw grid shows the **theoretical pen reach** between an inner and outer curve: blue is inside, amber outside. Change **Work origin → Pen Z** to update it, or uncheck **Show theoretical pen reach**. Radii are measured from the fixed robot base at X0/Y0; moving the project origin does not move the reach area. The wider grid shows X −220…220 and Y 130…430 mm; reach is clipped to this view. A dashed rectangle marks the unchanged simulator limits (X −150…150, Y 180…380 mm).
+
+The model uses the original [Rotrics Studio reach table](https://github.com/Rotrics-Dev/rotrics-studio-app/blob/447b97afb405ab046c9142c4f6f9d6edd6036e6a/web/src/utils/workAreaUtils.js), pen offset (101.5 + 12.5 mm), and 2 mm boundary margin. We interpolate between its 2 mm height samples for smooth updates. Source attribution and MIT license are in `assets/notices/rotrics-studio.txt`. This assumes robot-coordinate Z and the standard pen mounting; offsets from G92, custom tools, leveling, collisions, and pen-up travel are not modeled. It is a visual guide, not a hardware safety check. Simulator rectangular limits and G-code validation remain separate.
+
 ## Writing and pen fonts
 
 Click **Import font…** in Draw and choose a local **TTF or OTF** file (up to 2 MB). Run `npm ci` first, including for browser use. Conversion runs locally in a worker with progress and cancellation; completed paths remain available if conversion is cancelled or times out. Select the imported face from the font menu for other text boxes. Up to four faces can be loaded per project. The imported face retains its actual weight and italic style; import another face file for a different style.
@@ -92,7 +98,7 @@ Choose **Pen path → Outline / Centerline** in the right-hand drawing menu. Eac
 - Each logical text block is centered on its own X/Y offset from the work origin. Spaces and blank lines affect layout. Every pen stroke uses the project contact Z and configured pen lift (10 mm by default).
 - Supported input: English uppercase/lowercase letters, digits, ASCII punctuation, spaces, and line breaks. Maximum 20 text boxes, each up to 160 characters and 8 lines, subject to the combined 200-stroke/2,000-point job limit (including SVG). Unsupported characters are reported explicitly; they are never silently dropped. Shorten text, lower the height, or choose a simpler font when validation reports a limit.
 - Invalid edits leave the last valid canvas visible, show an inline explanation, and require successful G-code generation before Send is enabled. Text must also fit the illustrative workspace, including pen-up clearance.
-- Saving retains each box’s editable text, font, style, path mode, position, size, spacing, and alignment. Text boxes can share the layout with one imported SVG. Imported font geometry is saved once in the project, so reopening it on another machine needs no font installation. Text rotation is not implemented.
+- Saving retains each box’s editable text, font, style, path mode, position, size, spacing, and alignment. Text boxes can share the layout with one imported SVG. Imported font geometry is saved once in the project, so reopening it on another machine needs no font installation. Set **Rotation** (−180…180°) to turn a box around its center; positive angles turn counterclockwise. **Duplicate** adds an independently editable copy at the same position; drag it or change its X/Y offsets. Rotated paths are used for preview, bounds validation, saved projects and generated G-code.
 
 Writing execution remains simulated. USB diagnostics cannot send writing or other motion commands to a physical robot.
 
@@ -116,7 +122,7 @@ Limits: 100 steps, 20 repeats, 0–2,000 ms per wait and 120 seconds of total re
 
 Drawing setup also provides separate **Work speed**, **Travel speed** and **Pen lift** controls. Pen lift is 1–30 mm and is included in bounds checks; XY travel and work speeds are 60–3,000 mm/min. Defaults preserve existing projects' output. Vertical lifts remain 600 mm/min. Control adds a configurable jog/move speed and explicit XYZ targets.
 
-See the [legacy feature comparison and next milestones](docs/feature-parity.md) for the remaining laser, printing, Scratch, accessory, firmware and physical-execution gaps.
+See the [legacy feature comparison and next milestones](docs/feature-parity.md) for the remaining laser, Scratch, accessory, firmware and physical-execution gaps; 3D printing is intentionally out of scope.
 
 ## USB diagnostics (desktop only)
 
@@ -183,7 +189,7 @@ The interface uses standard browser modules and native controls. Electron and Se
 
 ## Current boundaries
 
-- SVG import supports the subset described above. G-code import is limited to the reviewed XYZ subset above. Teach playback is simulated. Laser, printing, Scratch and firmware updates are not implemented.
+- SVG import supports the subset described above. G-code import is limited to the reviewed XYZ subset above. Teach playback is simulated. 3D printing is intentionally excluded from the product scope. Laser, Scratch and firmware updates are not implemented.
 - Workspace bounds (`X −150…150`, `Y 180…380`, `Z −20…100`) are illustrative simulator limits, **not validated DexArm limits**. Projects must fit both the drawing and its configured pen lift inside them.
 - Simulator acknowledgements follow simulated completion. Real firmware can buffer motion; pause, cancellation, `M400`, command deadlines, and output shutdown need hardware verification before enabling physical commands.
 - Stop is a simulator cancellation action, not a physical emergency stop. No claim is made about laser safety, collision avoidance, calibration, or hardware accuracy.

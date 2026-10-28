@@ -1,3 +1,4 @@
+import { penReachAtHeight } from '../core/workspace.js';
 import { Controller } from '../core/controller.js';
 import { defaultProject, validateProject, drawingStrokes, drawingCommands, layoutProject, textBounds } from '../core/project.js';
 import { importSvg } from '../core/svg.js';
@@ -24,12 +25,13 @@ let selectedText = null;
 let dragging = null;
 let tab = 'draw';
 let lastLog = 0;
-const fields = ['project-name', 'size', 'feedrate', 'origin-x', 'origin-y', 'origin-z', 'writing-text', 'writing-font', 'writing-height', 'writing-letter-spacing', 'writing-line-spacing', 'writing-align', 'writing-mode-outline', 'writing-mode-centerline', 'writing-style', 'text-x', 'text-y', 'travel-feedrate', 'pen-lift'];
+const fields = ['project-name', 'size', 'feedrate', 'origin-x', 'origin-y', 'origin-z', 'writing-text', 'writing-font', 'writing-height', 'writing-letter-spacing', 'writing-line-spacing', 'writing-align', 'writing-mode-outline', 'writing-mode-centerline', 'writing-style', 'text-x', 'text-y', 'text-rotation', 'travel-feedrate', 'pen-lift'];
 const fontOptions = () => [...WRITING_FONTS, ...customFonts.map(({ id, name }) => ({ id, name: `${name} (imported)`, outline: true, custom: true }))];
 const active = () => ['running', 'pausing', 'paused'].includes(controller.state);
 const connected = () => !['disconnected', 'faulted', 'connecting'].includes(controller.state);
 const labels = { disconnected: 'Offline', connecting: 'Connecting', uninitialized: 'Needs home', ready: 'Ready', running: 'Running', pausing: 'Pausing', paused: 'Paused', faulted: 'Faulted' };
-const screenPoint = ({ x, y }) => [380 + x * 2.2, 485 - (y - 180) * 2.2];
+const DRAW_SCALE = 1.5;
+const screenPoint = ({ x, y }) => [380 + x * DRAW_SCALE, 495 - (y - 130) * DRAW_SCALE];
 
 function resetPreview() {
   generated = null;
@@ -77,6 +79,7 @@ function readProject(content) {
   if (content === undefined) {
     content = project.version === 2 ? { version: 2, texts: project.texts.map((text) => text.id !== selectedText ? text : {
       id: text.id, x: $('text-x').valueAsNumber, y: $('text-y').valueAsNumber,
+      ...(text.rotation !== undefined || $('text-rotation').valueAsNumber !== 0 ? { rotation: $('text-rotation').valueAsNumber } : {}),
       writing: {
         text: $('writing-text').value, font: $('writing-font').value,
         mode: $('writing-mode-outline').checked ? 'outline' : 'centerline', style: $('writing-style').value,
@@ -106,6 +109,7 @@ function fillWriting() {
   $('writing-style').value = writing.style || 'regular';
   $('text-x').value = box?.x || 0;
   $('text-y').value = box?.y || 0;
+  $('text-rotation').value = box?.rotation || 0;
   $('writing-mode-outline').checked = writing.mode === 'outline';
   $('writing-mode-centerline').checked = writing.mode !== 'outline';
   $('writing-error').textContent = '';
@@ -147,15 +151,36 @@ function drawTextBoxes() {
     if (selectedText === text.id) group.classList.add('selected');
     const rect = svg('rect');
     rect.setAttribute('x', x - 6); rect.setAttribute('y', y - 6);
-    rect.setAttribute('width', Math.max(12, (bounds.right - bounds.left) * 2.2 + 12));
-    rect.setAttribute('height', Math.max(12, (bounds.top - bounds.bottom) * 2.2 + 12));
+    rect.setAttribute('width', Math.max(12, (bounds.right - bounds.left) * DRAW_SCALE + 12));
+    rect.setAttribute('height', Math.max(12, (bounds.top - bounds.bottom) * DRAW_SCALE + 12));
     rect.setAttribute('rx', '3');
     group.append(rect);
     return group;
   }));
 }
 
+function drawReach() {
+  const visible = tab === 'draw' && $('show-reach').checked;
+  $('reach-controls').hidden = tab !== 'draw';
+  const z = $('origin-z').valueAsNumber;
+  const reach = penReachAtHeight(z);
+  $('reach-overlay').toggleAttribute('hidden', !visible || !reach);
+  if (!reach) {
+    $('reach-description').textContent = 'Enter Pen Z between −127 and 167 mm to preview theoretical reach. Simulator Z limits remain −20…100 mm.';
+    return;
+  }
+  const [cx, cy] = screenPoint({ x: 0, y: 0 });
+  const inner = reach.innerRadius * DRAW_SCALE;
+  const outer = reach.outerRadius * DRAW_SCALE;
+  const ring = `M ${cx + outer} ${cy} A ${outer} ${outer} 0 0 0 ${cx - outer} ${cy} L ${cx - inner} ${cy} A ${inner} ${inner} 0 0 1 ${cx + inner} ${cy} Z`;
+  $('reach-area').setAttribute('d', ring);
+  $('reach-outside').setAttribute('d', `M 50 45 H 710 V 495 H 50 Z ${ring}`);
+  $('reach-description').textContent = `Pen Z ${z.toFixed(1)} mm · Radius ${reach.innerRadius.toFixed(1)}–${reach.outerRadius.toFixed(1)} mm from robot base (X0, Y0). Original Studio model; unverified on this robot.`;
+}
+$('show-reach').addEventListener('change', drawReach);
+
 function draw() {
+  drawReach();
   if (['gcode', 'teach'].includes(tab)) { drawJob(); return; }
   $('job-endpoints').setAttribute('hidden', '');
   $('origin-marker').removeAttribute('hidden');
@@ -216,6 +241,7 @@ function render() {
   $('writing-editor').hidden = !writingEnabled;
   $('write-text').disabled = locked;
   $('delete-text').disabled = locked;
+  $('duplicate-text').disabled = locked || !selectedText;
   $('text-list').disabled = locked;
   $('text-list-field').hidden = !project.texts?.length;
   const options = (project.texts || []).map((text, index) => {
@@ -486,6 +512,17 @@ $('write-text').addEventListener('click', () => perform(() => {
   $('writing-text').focus(); $('writing-text').select();
 }));
 $('text-list').addEventListener('change', () => perform(() => selectText($('text-list').value)));
+$('duplicate-text').addEventListener('click', () => perform(() => {
+  const current = readProject();
+  const original = current.texts.find((text) => text.id === selectedText);
+  if (!original) throw new Error('Select a text box to duplicate');
+  const copy = { ...original, id: crypto.randomUUID() };
+  project = validateProject({ ...current, texts: [...current.texts, copy] });
+  selectedText = copy.id;
+  fillWriting(); resetPreview();
+  controller.message = 'Text duplicated at the same position. Drag the selected copy or change its X/Y offsets.';
+  render();
+}));
 $('delete-text').addEventListener('click', () => perform(() => {
   // Delete the selected box even when its draft text is invalid.
   project = validateProject({ ...project, texts: project.texts.filter((text) => text.id !== selectedText) });
@@ -504,7 +541,7 @@ function download(name, content, type) {
 }
 function canvasPoint(event) {
   const point = new DOMPoint(event.clientX, event.clientY).matrixTransform($('workspace').getScreenCTM().inverse());
-  return { x: (point.x - 380) / 2.2, y: 180 + (485 - point.y) / 2.2 };
+  return { x: (point.x - 380) / DRAW_SCALE, y: 130 + (495 - point.y) / DRAW_SCALE };
 }
 function moveText(id, x, y) {
   const next = validateProject({ ...readProject(), texts: project.texts.map((text) => text.id === id ? { ...text, x, y } : text) });

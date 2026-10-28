@@ -1073,3 +1073,12 @@ dialog p {
   .nav-item { width:auto; min-width:105px; }
   .job-status { flex-wrap:wrap; }
 }
+
+.reach-area { fill:rgba(79,119,219,.075); stroke:#7896cf; stroke-width:1.5; stroke-dasharray:6 4; }
+.reach-outside { fill:rgba(218,155,57,.14); }
+.reach-controls { margin:0 24px 14px; padding:12px; border:1px solid var(--border); border-radius:7px; }
+.reach-controls label { display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer; }
+.reach-controls input { width:14px; height:14px; margin:0; accent-color:var(--accent); }
+.reach-controls .hint { margin:7px 0 0; }
+
+.simulator-boundary { fill:none; stroke:#8b97a9; stroke-width:1; stroke-dasharray:4 5; }

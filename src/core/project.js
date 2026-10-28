@@ -49,7 +49,11 @@ export function validateProject(value) {
       if (!Number.isFinite(text.x) || !Number.isFinite(text.y) || Math.abs(text.x) > 300 || Math.abs(text.y) > 200) {
         throw new Error('Text box X/Y offsets must be finite and within the workspace dimensions');
       }
-      return { id: text.id, x: text.x, y: text.y, writing: validateWriting(text.writing, project.fonts) };
+      if (text.rotation !== undefined && (!Number.isFinite(text.rotation) || Math.abs(text.rotation) > 180)) {
+        throw new Error('Text rotation must be between −180 and 180 degrees');
+      }
+      return { id: text.id, x: text.x, y: text.y, writing: validateWriting(text.writing, project.fonts),
+        ...(text.rotation !== undefined ? { rotation: text.rotation } : {}) };
     });
   } else if (value.texts !== undefined) throw new Error('Text boxes require a version 2 layout project');
   if (value.writing !== undefined) {
@@ -107,7 +111,7 @@ export function drawingStrokes(project) {
   const { x, y, z } = project.origin;
   if (project.version === 2) {
     const artwork = project.artwork ? drawingStrokes({ ...project, version: 1 }) : [];
-    return [...artwork, ...project.texts.flatMap((text) => writingLayout(text.writing, project.fonts).strokes.map((stroke) =>
+    return [...artwork, ...project.texts.flatMap((text) => textLayout(text, project.fonts).strokes.map((stroke) =>
       stroke.map((point) => ({ x: x + text.x + point.x, y: y + text.y + point.y, z }))))];
   }
   if (project.writing) {
@@ -150,13 +154,23 @@ export function layoutProject(value) {
   return { ...rest, version: 2, texts: writing ? [{ id: 'text-1', x: 0, y: 0, writing }] : [] };
 }
 
-export function textBounds(text, origin, fonts = []) {
+function textLayout(text, fonts) {
   const layout = writingLayout(text.writing, fonts);
-  const points = layout.strokes.flat();
+  const angle = (text.rotation || 0) * Math.PI / 180;
+  const rotate = ({ x, y }) => !angle ? { x, y } : {
+    x: x * Math.cos(angle) - y * Math.sin(angle), y: x * Math.sin(angle) + y * Math.cos(angle),
+  };
+  return { strokes: layout.strokes.map((stroke) => stroke.map(rotate)),
+    corners: [-1, 1].flatMap((x) => [-1, 1].map((y) => rotate({ x: x * layout.width / 2, y: y * layout.height / 2 }))) };
+}
+
+export function textBounds(text, origin, fonts = []) {
+  const layout = textLayout(text, fonts);
+  const points = [...layout.strokes.flat(), ...layout.corners];
   return {
-    left: origin.x + text.x + Math.min(-layout.width / 2, ...points.map((p) => p.x)),
-    right: origin.x + text.x + Math.max(layout.width / 2, ...points.map((p) => p.x)),
-    bottom: origin.y + text.y + Math.min(-layout.height / 2, ...points.map((p) => p.y)),
-    top: origin.y + text.y + Math.max(layout.height / 2, ...points.map((p) => p.y)),
+    left: origin.x + text.x + Math.min(...points.map((p) => p.x)),
+    right: origin.x + text.x + Math.max(...points.map((p) => p.x)),
+    bottom: origin.y + text.y + Math.min(...points.map((p) => p.y)),
+    top: origin.y + text.y + Math.max(...points.map((p) => p.y)),
   };
 }

@@ -8,13 +8,13 @@ Reviewed 27 October 2026 against the manufacturer's manual and the public Studio
 | --- | --- | --- |
 | Connect, position reports, device/firmware information | Desktop USB connection and explicit M114/M115 diagnostics | Physical motion and module detection/selection not enabled |
 | Home and XYZ jogging | Simulator home, discrete jog, configurable speed, direct XYZ moves | Physical homing, motion envelopes, and fast motion mode need validation |
-| Drawing SVG/text, dimensions, origin, generate/download G-code | Implemented; multiple editable text boxes, real DejaVu styles, outline/centerline paths | Independent imported SVG object transforms, richer shape editing, presets |
+| Drawing SVG/text, dimensions, origin, generate/download G-code | Implemented; multiple editable text boxes, real DejaVu styles, outline/centerline paths; this batch adds per-text rotation and duplication | Independent imported SVG object transforms, richer shape editing, presets |
 | Work speed, travel speed, pen offset | Separate drawing work/travel speeds and adjustable pen lift | Limits remain illustrative; default legacy output is preserved |
 | Import third-party G-code, review and execute | XYZ subset import, modal-state handling, path/bounds review, canonical export, simulator playback | Does not accept arbitrary Cura/laser/extrusion code, arcs, offsets, homing, or accessories |
 | Teach & Play, repeat, tool actions | Editable named waypoints, simulator position capture, waits, repeat, reorder/delete, suction/gripper simulation, sequence JSON save/open and G-code export | Physical hand guidance, motor release/recapture, rotary tool, hardware playback |
 | Pause/resume/stop, progress | One shared acknowledged simulator scheduler for drawings, imports and sequences | Real firmware buffering and stop/output shutdown need hardware tests |
 | Laser SVG/raster/text, power and processing modes | Not implemented | Image processing and laser job preparation; verified hardware output controls |
-| STL/OBJ model placement, slicing, print settings | Not implemented | 3D model inspection and external-slicer print workflow before embedded slicing |
+| STL/OBJ model placement, slicing, print settings | Intentionally out of scope | 3D printing is excluded from the current and foreseeable scope; not a remaining parity gap |
 | Scratch visual programming | Not implemented | Blocks editor, execution semantics, and project compatibility |
 | Rotary, conveyor, rail | Not implemented | Accessory configuration, limits and motion models |
 | Settings/languages, firmware upgrades | Versioned local files and diagnostics only | Localization, firmware workflow, calibration and OS installers |
@@ -39,12 +39,14 @@ Moves are direct between waypoints; no lift or collision avoidance is inserted. 
 
 ### Drawing and manual control
 
+This batch adds optional per-text rotation (−180 to 180 degrees counterclockwise about the box center) and duplication of the selected text box, both retained in editable saved projects and generated G-code; no hardware behavior is claimed.
+
 Drawing projects accept optional `travelFeedrate` (60–3,000 mm/min) and `penLift` (1–30 mm). Contact motion uses the existing work `feedrate`; XY travel uses the independent travel speed, and vertical lifts retain 600 mm/min. Clearance is included in full-path bounds validation. Missing fields retain the old travel speed and 10 mm lift so existing projects compile identically. Manual Control adds explicit XYZ targets and a jog/move speed setting.
 
 ## Next parity batches
 
 1. Drawing object transforms and a small built-in artwork library; richer G-code visualization and diagnostics.
-2. Laser/raster job preparation and external-slicer print inspection, with tool-specific previews and formats. Treat hardware execution as a separate milestone.
+2. Laser/raster job preparation, with tool-specific previews and formats. 3D printing, including external-slicer print inspection, is intentionally excluded from the current and foreseeable scope. Treat hardware execution as a separate milestone.
 3. Blocks programming and accessories, followed by firmware/settings/localization and platform packaging.
 
 Physical execution requires device/firmware identification and observed serial transcripts, calibrated coordinates/tool offsets, motion-envelope tests, and verified pause/stop/output-off behavior. The existing USB query whitelist remains unchanged in this batch.
@@ -58,4 +60,4 @@ Physical execution requires device/firmware identification and observed serial t
 - [Legacy Teach & Play UI](https://github.com/Rotrics-Dev/rotrics-studio-app/blob/dev/web/src/containers/basic/ui/TeachAndPlay/Index.jsx) and [settings](https://github.com/Rotrics-Dev/rotrics-studio-app/blob/dev/web/src/containers/basic/lib/settings/teach_and_play.json): repeat, step array, tool-specific action and rotary controls.
 - [Official Python API](https://github.com/Rotrics-Dev/DexArm_API/blob/master/pydexarm/pydexarm.py): command examples, G4 waits and module/action commands. Where its suction-place helper differs, this implementation follows the legacy Teach settings and manual release-to-neutral behavior.
 
-No upstream implementation code was copied. Full released-app runtime, other operating systems, physical robot operations and hazardous tools were not tested.
+The theoretical reach table and pen offsets were adapted from the original MIT-licensed Studio; attribution is retained in `assets/notices/rotrics-studio.txt`. No firmware code was copied. Full released-app runtime, other operating systems, physical robot operations and hazardous tools were not tested.
