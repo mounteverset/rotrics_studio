@@ -15,6 +15,7 @@ Reviewed 27 October 2026 against the manufacturer's manual and the public Studio
 | Pause/resume/stop, progress | One shared acknowledged simulator scheduler for drawings, imports and sequences | Real firmware buffering and stop/output shutdown need hardware tests |
 | Laser SVG/raster/text, power and processing modes | Not implemented | Image processing and laser job preparation; verified hardware output controls |
 | STL/OBJ model placement, slicing, print settings | Intentionally out of scope | 3D printing is excluded from the current and foreseeable scope; not a remaining parity gap |
+| Joypad control | Dedicated standard-Gamepad workspace with XYZ hold-to-jog, fine steps, input monitor and automatic disarm | Real controller/OS qualification; physical, rotary and pump control remain unimplemented |
 | Scratch visual programming | Not implemented | Blocks editor, execution semantics, and project compatibility |
 | Rotary, conveyor, rail | Not implemented | Accessory configuration, limits and motion models |
 | Settings/languages, firmware upgrades | Versioned local files and diagnostics only | Localization, firmware workflow, calibration and OS installers |

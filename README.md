@@ -48,6 +48,7 @@ After `npm ci`, run:
 npm run check
 npm test
 npm run test:svg
+npm run test:joypad
 ```
 
 The first two commands work without a graphical desktop. `test:svg` uses Electron and needs its platform libraries and a display session. Tests use simulated transports and fake serial ports; no robot is required.
@@ -72,6 +73,14 @@ After updating the checkout, run `git pull` followed by `npm ci` and the verific
 7. Save a `.dexarm.json` project, then reopen it using **Open project**. Multi-text layouts use version 2 and retain individual text settings and positions alongside optional imported SVG. Older version 1 star, SVG, and writing projects still open; single writing is upgraded without changing its pen paths. Changes are held in memory until saved; there is no autosave. **Use star** replaces the complete layout; importing SVG replaces existing SVG while keeping text boxes.
 
 The command activity drawer shows the most recent 150 sent/received lines. The progress display counts acknowledged commands; simulation completes after its `M400` acknowledgement.
+
+## Joypad mode
+
+Choose **Joypad** in the sidebar. Connect and home the simulator, connect a gamepad, and press a button while Studio has focus. Select the controller, center both sticks, release RB/R1, then click **Enable joypad**. Standard-mapped controllers only; unsupported mappings are reported.
+
+Hold **RB/R1** to move: left stick controls X/Y and right stick up/down controls Z. Hold **LB/L1** for fine movement (0.2 mm instead of up to 1 mm per acknowledged step). **B/Circle**, **Escape**, or **Disable joypad** disarms it. Live input readouts show how the pad is mapped. Losing focus, leaving the workspace, unplugging, simulator errors or reaching bounds requires explicitly enabling again. Releasing hold stops new steps; a submitted step can finish. This mode controls the simulator only, with no pump, rotary or physical commands.
+
+No new dependencies: the native Gamepad API works in supported Electron/browser environments. Check controller/OS compatibility locally; software tests use synthetic input. Run `npm run test:joypad` for the sandboxed Electron integration checks (graphical environment required). See [GitHub findings and integration decisions](docs/joypad-research.md).
 
 ## SVG placement
 

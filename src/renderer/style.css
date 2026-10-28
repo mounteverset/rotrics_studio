@@ -1082,3 +1082,8 @@ dialog p {
 .reach-controls .hint { margin:7px 0 0; }
 
 .simulator-boundary { fill:none; stroke:#8b97a9; stroke-width:1; stroke-dasharray:4 5; }
+
+.joypad-mapping { display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px; margin:24px 0; }
+.joypad-mapping dt { font-weight:600; }
+.joypad-mapping dd { margin:0; color:var(--muted); }
+#joypad-input { display:block; font-variant-numeric:tabular-nums; }

@@ -1,3 +1,4 @@
+import { setupJoypad } from './joypad.js';
 import { penReachAtHeight } from '../core/workspace.js';
 import { Controller } from '../core/controller.js';
 import { defaultProject, validateProject, drawingStrokes, drawingCommands, layoutProject, textBounds } from '../core/project.js';
@@ -24,6 +25,7 @@ let taughtJob = null;
 let selectedText = null;
 let dragging = null;
 let tab = 'draw';
+const joypad = setupJoypad(controller, () => tab === 'joypad');
 let lastLog = 0;
 const fields = ['project-name', 'size', 'feedrate', 'origin-x', 'origin-y', 'origin-z', 'writing-text', 'writing-font', 'writing-height', 'writing-letter-spacing', 'writing-line-spacing', 'writing-align', 'writing-mode-outline', 'writing-mode-centerline', 'writing-style', 'text-x', 'text-y', 'text-rotation', 'travel-feedrate', 'pen-lift', 'artwork-x', 'artwork-y', 'artwork-rotation'];
 const fontOptions = () => [...WRITING_FONTS, ...customFonts.map(({ id, name }) => ({ id, name: `${name} (imported)`, outline: true, custom: true }))];
@@ -195,6 +197,15 @@ $('show-reach').addEventListener('change', drawReach);
 
 function draw() {
   drawReach();
+  if (tab === 'joypad') {
+    $('drawing-path').setAttribute('d', ''); $('travel-path').setAttribute('d', '');
+    $('origin-marker').setAttribute('hidden', ''); $('job-endpoints').setAttribute('hidden', '');
+    $('pen-marker').toggleAttribute('hidden', !controller.position);
+    if (controller.position) $('pen-marker').setAttribute('transform', `translate(${screenPoint(controller.position).join(' ')})`);
+    $('drawing-dimensions').textContent = 'Live simulator position · XYZ jogging';
+    $('canvas-description').textContent = 'Joypad-controlled simulated pen position. Top view only; height is shown in the device coordinates.';
+    return;
+  }
   if (['gcode', 'teach'].includes(tab)) { drawJob(); return; }
   $('job-endpoints').setAttribute('hidden', '');
   $('origin-marker').removeAttribute('hidden');
@@ -289,7 +300,7 @@ function render() {
   $('preview').disabled = locked || (tab === 'draw' && project.version === 2 && !project.texts.length && !project.artwork);
   $('preview').textContent = tab === 'gcode' ? '2 · Review G-code' : tab === 'teach' ? '2 · Generate sequence G-code' : generated ? '2 · Regenerate G-code' : '2 · Generate G-code';
   $('workflow-title').textContent = tab === 'gcode' ? 'Source → Review → Simulate' : tab === 'teach' ? 'Sequence → G-code → Play' : 'Layout → G-code → Send';
-  $('canvas-tool').textContent = tab === 'gcode' ? 'XYZ MOTION' : tab === 'teach' ? sequence.tool.toUpperCase() : 'PEN TOOL';
+  $('canvas-tool').textContent = tab === 'joypad' ? 'JOYPAD · SIMULATOR' : tab === 'gcode' ? 'XYZ MOTION' : tab === 'teach' ? sequence.tool.toUpperCase() : 'PEN TOOL';
   $('download-gcode').disabled = !reviewed;
   $('gcode-output').value = reviewed ? reviewed.commands.join('\n') + '\n' : '';
   $('gcode-summary').textContent = reviewed ? `${reviewed.commands.length} commands · ready to review` : 'Generate or review the current job first';
@@ -300,7 +311,9 @@ function render() {
   $('pause').disabled = controller.state === 'pausing';
   document.querySelectorAll('[data-axis]').forEach((button) => { button.disabled = !ready; });
   $('status-message').textContent = controller.message;
-  $('job-title').textContent = active() ? `${labels[controller.state]} · ${controller.jobName || project.name}` : controller.total && controller.completed === controller.total ? 'Your job is complete' : reviewed ? 'Job ready to simulate' : tab === 'teach' ? 'Create a sequence' : tab === 'gcode' ? 'Review your G-code' : 'Create your layout';
+  $('job-title').textContent = tab === 'joypad' ? 'Live joypad control' : active() ? `${labels[controller.state]} · ${controller.jobName || project.name}` : controller.total && controller.completed === controller.total ? 'Your job is complete' : reviewed ? 'Job ready to simulate' : tab === 'teach' ? 'Create a sequence' : tab === 'gcode' ? 'Review your G-code' : 'Create your layout';
+  for (const id of ['canvas-steps', 'canvas-legend', 'progress-count', 'job-progress']) $(id).hidden = tab === 'joypad';
+  $('canvas-title').textContent = tab === 'joypad' ? 'Simulated joypad workspace' : 'Simulated drawing workspace';
   $('progress-count').textContent = controller.total ? `${controller.completed} / ${controller.total} commands` : '—';
   $('job-progress').max = controller.total || 1;
   $('job-progress').value = controller.completed;
@@ -327,6 +340,7 @@ function render() {
     lastLog = controller.log.length;
   }
   renderJobEditors(ready, locked);
+  joypad.refresh();
   draw();
 }
 
@@ -381,6 +395,7 @@ for (const id of fields) $(id).addEventListener('input', () => {
   render();
 });
 document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => {
+  joypad.leave();
   tab = button.dataset.tab;
   document.querySelectorAll('[data-tab]').forEach((item) => {
     item.classList.toggle('selected', item === button);
@@ -388,18 +403,19 @@ document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListe
     else item.removeAttribute('aria-current');
   });
   $('drawing-settings').hidden = tab !== 'draw';
-  $('drawing-workflow').hidden = tab === 'control';
+  $('drawing-workflow').hidden = ['control', 'joypad'].includes(tab);
+  $('joypad-settings').hidden = tab !== 'joypad';
   $('gcode-settings').hidden = tab !== 'gcode';
   $('teach-settings').hidden = tab !== 'teach';
   $('jog-settings').hidden = !['control', 'teach'].includes(tab);
   $('usb-settings').hidden = tab !== 'control';
-  $('generated-code').hidden = tab === 'control';
+  $('generated-code').hidden = ['control', 'joypad'].includes(tab);
   $('open').hidden = $('save').hidden = tab !== 'draw';
-  const titles = { draw: 'Drawing workspace', control: 'Manual control', gcode: 'G-code workspace', teach: 'Teach & Play' };
-  const descriptions = { draw: 'Create your layout, generate G-code, then send the checked job.', control: 'Move to coordinates or jog the simulator. USB diagnostics stay separate.', gcode: 'Open or paste XYZ G-code, review the path, then simulate.', teach: 'Record points, arrange actions, and replay a repeatable sequence.' };
+  const titles = { draw: 'Drawing workspace', control: 'Manual control', gcode: 'G-code workspace', teach: 'Teach & Play', joypad: 'Joypad control' };
+  const descriptions = { draw: 'Create your layout, generate G-code, then send the checked job.', control: 'Move to coordinates or jog the simulator. USB diagnostics stay separate.', gcode: 'Open or paste XYZ G-code, review the path, then simulate.', teach: 'Record points, arrange actions, and replay a repeatable sequence.', joypad: 'Use a game controller to jog the simulator. Hold to move; release to stop issuing steps.' };
   $('page-title').textContent = titles[tab];
   $('page-description').textContent = descriptions[tab];
-  $('canvas-instructions').textContent = tab === 'gcode' ? 'Green: first point. Amber: last point. Top view only; initial approach and Z motion are not shown.' : tab === 'teach' ? 'Move directly between recorded points. Add explicit lift points for clearance. Green: first point; amber: last point. No collision simulation.' : tab === 'control' ? 'Jog or move to explicit XYZ coordinates. The drawing is shown for reference; manual moves do not change it.' : 'Insert text, click a box to edit it, then drag it into place. Arrow keys move the selected box 1 mm; Shift moves 10 mm.';
+  $('canvas-instructions').textContent = tab === 'joypad' ? 'Live simulator pen position. Left stick: XY; right stick: Z. Hold RB/R1 to jog. Height is shown in Device. No collision simulation.' : tab === 'gcode' ? 'Green: first point. Amber: last point. Top view only; initial approach and Z motion are not shown.' : tab === 'teach' ? 'Move directly between recorded points. Add explicit lift points for clearance. Green: first point; amber: last point. No collision simulation.' : tab === 'control' ? 'Jog or move to explicit XYZ coordinates. The drawing is shown for reference; manual moves do not change it.' : 'Insert text, click a box to edit it, then drag it into place. Arrow keys move the selected box 1 mm; Shift moves 10 mm.';
   $('path-legend').textContent = ['gcode', 'teach'].includes(tab) ? 'Linear XYZ motion (top view)' : 'Drawing path';
   $('travel-legend').textContent = tab === 'gcode' ? 'Source G0 travel' : tab === 'teach' ? 'No implicit pen lift' : 'Pen-up travel';
   render();
