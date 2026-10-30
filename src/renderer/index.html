@@ -11,20 +11,32 @@
 <body>
   <header class="topbar">
     <a class="brand" href="#"><span class="brand-mark" aria-hidden="true">d.</span> DexArm <strong>Studio</strong><span class="version">ALPHA</span></a>
-    <div class="connection"><span class="status-dot" id="connection-dot"></span><span id="connection-label">Simulator disconnected</span><button id="connect" class="button small">Connect simulator</button></div>
-    <button id="stop" class="button stop" disabled><span aria-hidden="true">■</span> Stop simulation</button>
+    <div class="connection simulator-connection"><span class="status-dot" id="connection-dot"></span><span id="connection-label">Simulator disconnected</span><button id="connect" class="button small">Connect simulator</button><button id="stop" class="button small" disabled>Stop simulation</button></div>
+    <section class="robot-bar" aria-label="Physical robot connection and controls">
+      <div class="robot-identity"><span class="status-dot" id="usb-connection-dot" aria-hidden="true"></span><div><strong>DexArm · USB</strong><span id="usb-connection-label" role="status" aria-live="polite">Disconnected</span></div></div>
+      <button id="usb-connect" class="button primary small">Connect robot</button>
+      <div class="robot-actions">
+        <button id="usb-home" class="button small" disabled>Home robot</button>
+        <button id="usb-drawing" class="button small" disabled>Send drawing</button>
+        <button id="usb-gcode" class="button small" disabled hidden>Send G-code</button>
+        <button id="usb-pause" class="button small" disabled>Pause robot</button>
+        <button id="usb-stop" class="button stop small" disabled>■ Stop robot</button>
+        <button id="usb-settings-toggle" class="button small" popovertarget="usb-settings" aria-controls="usb-settings">Robot settings</button>
+      </div>
+      <p id="usb-progress" class="robot-progress hint" role="status">No physical job</p>
+    </section>
   </header>
   <div class="app-layout">
     <aside class="sidebar" aria-label="Workspace navigation">
       <p class="eyebrow">WORKSPACE</p>
       <nav><button class="nav-item selected" data-tab="draw" aria-current="page"><span aria-hidden="true">◇</span> Draw <span class="nav-index">01</span></button><button class="nav-item" data-tab="control"><span aria-hidden="true">⌘</span> Control <span class="nav-index">02</span></button><button class="nav-item" data-tab="gcode"><span aria-hidden="true">⌁</span> G-code <span class="nav-index">03</span></button><button class="nav-item" data-tab="teach"><span aria-hidden="true">◎</span> Teach & Play <span class="nav-index">04</span></button><button class="nav-item" data-tab="joypad"><span aria-hidden="true">⊕</span> Joypad <span class="nav-index">05</span></button></nav>
-      <div class="sidebar-note"><span class="chip">SIMULATION</span><h2>A place to try things.</h2><p>Explore the workflow without moving a physical robot.</p><p>USB diagnostics are in Control. Physical motion awaits firmware validation.</p></div>
+      <div class="sidebar-note"><span class="chip">SIMULATION</span><h2>A place to try things.</h2><p>Explore the workflow without moving a physical robot.</p><p>Connect your physical arm in the header. The canvas and simulator controls remain separate.</p></div>
       <a class="sidebar-footer" href="#activity">Open command activity <span aria-hidden="true">↗</span></a>
     </aside>
     <main>
       <div class="page-heading"><div><p class="eyebrow">YOUR IDEAS, IN MOTION</p><h1 id="page-title">Drawing workspace</h1><p id="page-description">Create your layout, generate G-code, then send the checked job.</p></div><div class="file-actions"><button id="open" class="button">Open project</button><button id="save" class="button">Save project <span aria-hidden="true">↗</span></button><input id="project-file" type="file" accept=".json,application/json" hidden></div></div>
-      <div class="notice"><span aria-hidden="true">◉</span><p><strong>Simulator mode</strong> · Workspace limits and motion are illustrative. The canvas shows simulation; USB diagnostics are separate.</p></div>
-      <section id="drawing-workflow" class="card run-card workflow-card"><h2 id="workflow-title">Layout → G-code → Send</h2><p id="run-hint" role="status">1. Create your layout. 2. Generate G-code. 3. Connect and home to simulate.</p><button id="preview" class="button primary full">2 · Generate G-code</button><button id="boundary-run" class="button full" disabled>Run boundary · simulator</button><button id="download-gcode" class="button full" disabled>Download .gcode</button><button id="run" class="button full" disabled>3 · Send to simulator →</button><button class="button full" disabled title="Physical job sending awaits firmware and calibration validation">Send to robot · unavailable</button><p class="hint">Physical robot sending is not enabled. Downloaded G-code uses illustrative simulator limits.</p></section>
+      <div class="notice"><span aria-hidden="true">◉</span><p><strong>Simulator mode</strong> · Workspace limits and motion are illustrative. The canvas shows simulation; Physical robot controls are in the header.</p></div>
+      <section id="drawing-workflow" class="card run-card workflow-card"><h2 id="workflow-title">Layout → G-code → Send</h2><p id="run-hint" role="status">1. Create your layout. 2. Generate G-code. 3. Connect and home to simulate.</p><button id="preview" class="button primary full">2 · Generate G-code</button><button id="boundary-run" class="button full" disabled>Run boundary · simulator</button><button id="download-gcode" class="button full" disabled>Download .gcode</button><button id="run" class="button full" disabled>3 · Send to simulator →</button><p class="hint">Physical pen jobs: generate here, then use Send drawing in the header. Commissioning bounds apply; hardware behavior remains unverified.</p></section>
       <div class="studio-grid">
         <section class="workspace card" aria-label="Drawing preview">
           <div class="workspace-toolbar"><div id="canvas-steps" class="steps" aria-label="Job workflow"><span id="step-prepare" class="active">1 <b>Layout</b></span><span aria-hidden="true">›</span><span id="step-preview">2 <b>Generate G-code</b></span><span aria-hidden="true">›</span><span id="step-run">3 <b>Send</b></span></div><span class="unit-label">TOP VIEW · mm</span></div>
@@ -100,18 +112,7 @@
           </section>
           <section class="card device-card"><div class="section-heading"><h2>Device</h2><span class="chip">SIMULATOR</span></div><div class="device-name"><span class="device-symbol" aria-hidden="true">⌁</span><div><strong>DexArm</strong><span>Virtual pen module</span></div><span id="device-state" class="state-label">Offline</span></div><div class="coordinates"><div><span>X <small>mm</small></span><strong id="pos-x">—</strong></div><div><span>Y <small>mm</small></span><strong id="pos-y">—</strong></div><div><span>Z <small>mm</small></span><strong id="pos-z">—</strong></div></div><button id="home" class="button full" disabled>⌂ &nbsp; Home simulator</button><p id="home-hint" class="hint">Connect first. Homing requires an explicit action.</p></section>
           <section class="card" id="jog-settings" hidden><div class="section-heading"><h2>Manual control</h2><span class="chip">mm</span></div><label>Jog / move speed <span class="input-unit">mm/min</span><input id="jog-feedrate" type="number" min="60" max="3000" value="600"></label><label>Jog step<select id="jog-step"><option value="1">1 mm · fine</option><option value="5" selected>5 mm · normal</option><option value="10">10 mm · coarse</option></select></label><div class="jog-pad"><button class="button" data-axis="y" data-direction="1">Y +</button><div><button class="button" data-axis="x" data-direction="-1">X −</button><span aria-hidden="true">✛</span><button class="button" data-axis="x" data-direction="1">X +</button></div><button class="button" data-axis="y" data-direction="-1">Y −</button></div><div class="field-row"><button class="button" data-axis="z" data-direction="1">Z +</button><button class="button" data-axis="z" data-direction="-1">Z −</button></div><p class="hint">Home first. Jogging and moves are locked during a job.</p><h3>Move to coordinates</h3><div class="field-row"><label>X<input id="move-x" type="number" step="0.1" value="0"></label><label>Y<input id="move-y" type="number" step="0.1" value="300"></label><label>Z<input id="move-z" type="number" step="0.1" value="10"></label></div><button id="move-current" class="button full">Copy simulator position</button><button id="move-to" class="button full">Move simulator to XYZ</button></section>
-          <section class="card" id="usb-settings" hidden>
-            <div class="section-heading"><h2>USB diagnostics</h2><span class="chip">NO MOTION</span></div>
-            <p id="usb-availability" class="hint">Use the desktop app to inspect a physical device. The canvas always shows the simulator.</p>
-            <label>Serial port<select id="usb-port"><option value="">Refresh to find ports</option></select></label>
-            <div class="field-row"><button id="usb-refresh" class="button">Refresh ports</button><button id="usb-connect" class="button">Connect USB</button></div>
-            <p id="usb-status" class="hint" role="status" aria-live="polite">USB disconnected. Physical motion is disabled.</p>
-            <div class="field-row usb-queries"><button id="usb-firmware" class="button">Read firmware</button><button id="usb-position" class="button">Read position</button></div>
-            <dl class="usb-report"><dt>Firmware report</dt><dd id="usb-firmware-report">Not requested</dd><dt>Reported XYZ · mm</dt><dd id="usb-position-report">Unknown · not physical tracking</dd></dl>
-            <button id="usb-export" class="button full">Export diagnostic report</button>
-            <details class="svg-help"><summary>USB command activity</summary><ol id="usb-log" class="usb-log"><li>No USB commands sent.</li></ol></details>
-            <p class="hint">115200 baud · 8N1. Select the computer port and data cable described in the DexArm manual. Other serial devices may appear here. A reported name does not verify compatibility. Disconnecting USB does not stop motion or disable tools.</p>
-          </section>
+
 
         </aside>
       </div>
@@ -119,6 +120,27 @@
       <p class="footer-note">DEXARM STUDIO <span>Local projects. Explicit motion. No cloud required.</span><span>Prototype 0.1</span></p>
     </main>
   </div>
+  <section id="usb-settings" class="robot-settings" popover="auto" aria-labelledby="usb-settings-title">
+    <div class="section-heading"><h2 id="usb-settings-title">Robot settings</h2><button id="usb-settings-close" class="button small" popovertarget="usb-settings" popovertargetaction="hide" aria-label="Close robot settings">Close</button></div><p class="hint">USB pen setup · Hardware behavior unverified. Connect, Home, Send and Stop are always in the header.</p>
+    <p id="usb-availability" class="hint">Use the desktop app to inspect a physical device. The canvas always shows the simulator.</p>
+    <label>Serial port<select id="usb-port"><option value="">Refresh to find ports</option></select></label>
+    <button id="usb-refresh" class="button full">Refresh ports</button>
+    <p id="usb-status" class="hint" role="status" aria-live="polite">USB disconnected. Physical motion is disabled.</p>
+    <div class="field-row usb-queries"><button id="usb-firmware" class="button">Read firmware</button><button id="usb-position" class="button">Read position</button></div>
+    <dl class="usb-report"><dt>Firmware report</dt><dd id="usb-firmware-report">Not requested</dd><dt>Reported XYZ · mm</dt><dd id="usb-position-report">Unknown · not physical tracking</dd></dl>
+    <p class="hint">The canvas and other motion controls remain simulated. These USB controls move the physical arm. Pen attachment only; verify clearance and firmware before homing.</p>
+    <label>USB jog step<select id="usb-step"><option value="1">1 mm</option><option value="5">5 mm</option><option value="10">10 mm</option></select></label>
+    <label>USB jog speed · mm/min<input id="usb-feed" type="number" min="60" max="3000" value="600"></label>
+    <div class="field-row"><button class="button" data-usb-axis="x" data-usb-direction="-1">X −</button><button class="button" data-usb-axis="x" data-usb-direction="1">X +</button><button class="button" data-usb-axis="y" data-usb-direction="-1">Y −</button><button class="button" data-usb-axis="y" data-usb-direction="1">Y +</button><button class="button" data-usb-axis="z" data-usb-direction="-1">Z −</button><button class="button" data-usb-axis="z" data-usb-direction="1">Z +</button></div>
+    <div class="field-row"><label>USB target X<input id="usb-target-x" type="number" value="0" step="0.1"></label><label>Y<input id="usb-target-y" type="number" value="300" step="0.1"></label><label>Z<input id="usb-target-z" type="number" value="10" step="0.1"></label></div>
+    <button id="usb-move" class="button full" disabled>Move physical arm to XYZ</button>
+    <p class="hint">Generate the drawing or review G-code in its mode first, then use Send in the header. Main process checks the entire path, including approach, against the commissioning bounds and theoretical pen reach. No collision or surface calibration is inferred.</p>
+    <p class="hint">Pause waits for queued motion to finish. Stop requests M410 and discards the job; its physical response is unverified. Neither USB disconnect nor this button is a physical emergency stop.</p>
+    <button id="usb-export" class="button full">Export diagnostic report</button>
+    <details class="svg-help"><summary>USB command activity</summary><ol id="usb-log" class="usb-log"><li>No USB commands sent.</li></ol></details>
+    <p class="hint">115200 baud · 8N1. Select the computer port and data cable described in the DexArm manual. Other serial devices may appear here. A reported name does not verify compatibility. Disconnecting USB does not stop motion or disable tools.</p>
+  </section>
+
   <dialog id="error-dialog"><h2>Something needs attention</h2><p id="error-message"></p><form method="dialog"><button class="button primary">Got it</button></form></dialog>
 </body>
 </html>

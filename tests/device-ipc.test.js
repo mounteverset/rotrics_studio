@@ -12,7 +12,7 @@ function setup() {
   const ports = [{ path: '/dev/ttyUSB0' }];
   const snapshot = { state: 'connected', path: '/dev/ttyUSB0' };
   const monitor = {};
-  for (const method of ['list', 'connect', 'query', 'disconnect', 'snapshot']) {
+  for (const method of ['list', 'connect', 'query', 'disconnect', 'snapshot', 'home', 'move', 'run', 'pause', 'resume', 'stop']) {
     monitor[method] = async (...args) => {
       calls.push([method, ...args]);
       return method === 'list' ? ports : snapshot;
@@ -27,7 +27,7 @@ function setup() {
 }
 
 test('all device channels reject unauthorized senders, subframes, and URLs before dispatch', async () => {
-  for (const channel of ['device:list', 'device:connect', 'device:query', 'device:disconnect', 'device:snapshot']) {
+  for (const channel of ['device:list', 'device:connect', 'device:query', 'device:disconnect', 'device:snapshot', 'device:home', 'device:move', 'device:run', 'device:pause', 'device:resume', 'device:stop']) {
     for (const invalid of ['sender', 'subframe', 'url', 'missing frame', 'missing window']) {
       const { handlers, calls, window, event } = setup();
       if (invalid === 'sender') event.sender = {};
@@ -59,7 +59,7 @@ test('query accepts only exact M115 and M114 strings, rejecting command injectio
 
 test('authorized requests dispatch to the matching methods and return their results', async () => {
   const { handlers, calls, ports, snapshot, event } = setup();
-  assert.deepEqual([...handlers.keys()], ['device:list', 'device:connect', 'device:query', 'device:disconnect', 'device:snapshot']);
+  assert.deepEqual([...handlers.keys()], ['device:list', 'device:connect', 'device:query', 'device:disconnect', 'device:snapshot', 'device:home', 'device:move', 'device:run', 'device:pause', 'device:resume', 'device:stop']);
   assert.equal(await handlers.get('device:list')(event), ports);
   for (const path of ['x', '/dev/ttyUSB0', 'x'.repeat(256)]) {
     assert.equal(await handlers.get('device:connect')(event, path), snapshot);

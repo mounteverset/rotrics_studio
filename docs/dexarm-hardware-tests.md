@@ -1,10 +1,10 @@
 # DexArm hardware test ledger
 
-Last updated: 28 October 2026. **No DexArm is currently connected. All hardware checks below are pending.**
+Last updated: 30 October 2026. **No DexArm is currently connected. All hardware checks below are pending.**
 
 This is the running list for commissioning physical control and checking future changes. Add tests here whenever a feature affects robot motion, coordinates, tools or recovery. Keep IDs stable and append run records; do not treat a simulator or unit-test pass as a hardware pass. 3D printing is out of scope.
 
-Physical USB is currently query-only. Motion-dependent tests must wait for the physical transport and relevant controls to be implemented and reviewed. Start with the pen attachment, clear space and raised low-speed motion; an operator must be able to remove power independently of the app. This document is a test plan, not authorization for unattended motion or hazardous-tool output.
+Physical USB pen control is implemented and tested against fake serial devices. Motion-dependent tests below are still pending commissioning on a real DexArm. Start with the pen attachment, clear space and raised low-speed motion; an operator must be able to remove power independently of the app. This document is a test plan, not authorization for unattended motion or hazardous-tool output.
 
 ## Record before the first run
 
@@ -80,6 +80,24 @@ Physical USB is currently query-only. Motion-dependent tests must wait for the p
 | [ ] | HW-31 | Reviewed G-code playback | Supported modal XYZ files match the checked canonical path; unsupported source fails before motion. Verify initial approach and clearance separately. |
 | [ ] | HW-32 | Teach & Play physical waypoints | Recorded coordinates, direct moves, explicit clearance, waits and repetitions match intended behavior. Physical hand-guiding remains unavailable until separately implemented/verified. |
 | [ ] | HW-33 | Pneumatic attachment semantics | Only with the appropriate attachment: verify pick/release/neutral/off, startup/finish behavior and response to faults; pump state must not be presented as a physical grip sensor. |
+
+## USB-control commissioning additions (30 October 2026)
+
+These tests specifically accept the newly implemented desktop USB controls. All remain **not run**. Use the setup record above and append measured results below; fake-port tests do not satisfy these entries.
+
+| Done | ID | Test | Evidence / pass condition |
+| --- | --- | --- | --- |
+| [ ] | HW-34 | Desktop connection and identity gates | Refresh/select the intended port; connect sends no commands, home/jog/run remain locked until firmware is read and home completed. Check that simulator controls cannot move the physical robot. Verify header connection/Home/Send/Pause/Stop persist across workspaces, settings open/close/Escape send no motion, and the physical Stop stays accessible while settings are open. |
+| [ ] | HW-35 | Home command/completion/report sequence | Capture M1112 → M400 → M114 on actual firmware. Verify completion and reported XYZ before controls unlock. A missing report, fault or disconnect must keep motion locked. Never reset encoder calibration as part of this test. |
+| [ ] | HW-36 | Discrete physical jog and absolute XYZ | Test each axis ±1 mm first, then 5/10 mm within clear space, at measured low feed. Verify units, polarity, modal G21/G90 reset, completion barrier and refreshed coordinates. Check step/speed/bounds rejection sends nothing. |
+| [ ] | HW-37 | Drawing send from generated snapshot | Generate a small raised/pen test, send via the header USB control without changing modes and compare transcript, geometry and dimensions. Editing invalidates the old generation. Confirm no pump, laser or printer commands are emitted. |
+| [ ] | HW-38 | Reviewed G-code send and initial approach | Use supported XYZ/G4 input. Compare canonical commands and physical approach/clearance. Invalid source, excessive speed or any out-of-bounds/reach segment must reject the entire job before motion. |
+| [ ] | HW-39 | Full-path reach validation at height | Check paths near inner/outer theoretical pen boundaries at multiple Z values, including Z-only lift, straight segment interiors and the approach from actual reported position. Keep all probes within a previously measured safe area; record model discrepancies. |
+| [ ] | HW-40 | Acknowledgement count versus physical completion | Capture command acknowledgements and motion timing; final M400 must finish before completion is shown, followed by M114 refresh. Confirm whether reports represent measured/commanded position. Missing reports must lock further motion. |
+| [ ] | HW-41 | Pause barrier/resume ownership | Pause during motion: observe requested → M400 draining → paused, and measure drift/latency. No next job motion after barrier until explicit Resume. Query, home, jog and competing jobs must be rejected while busy. Repeat pause then disconnect/stop; no blocked job or automatic resume. |
+| [ ] | HW-42 | Quick-stop under outstanding acknowledgement | In a clear low-speed test, press USB Stop during a held/slow acknowledgement and while paused/homing. Verify M410 reaches firmware promptly without waiting for the active acknowledgement, measure physical stopping time/distance and buffered remainder. UI must discard job, clear home and require reconnect/home; no automatic continuation. |
+| [ ] | HW-43 | USB timeout/error/unplug and application closure | Controlled failures during home, jog, running and paused job: no automatic retries/replay, unknown position/home cleared and deliberate reconnection required. Check firmware behavior after window/app closure; disconnect alone is not a stop or output-off claim. |
+| [ ] | HW-44 | Reports, deadlines and OS qualification | Export transcript with firmware/OS/port and measured response times. Qualify the 5 s diagnostics/120 s motion deadlines on intended jobs, serial drivers and target OS. A deadline failure must fault without replay. Check startup chatter/reset behavior on opening the real port. |
 
 Laser, rotary, rail and conveyor hardware acceptance must receive additional test IDs before those features are implemented/enabled. No laser-output or printing tests are included in this batch.
 

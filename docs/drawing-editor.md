@@ -26,9 +26,9 @@ A recovery copy is written to this origin's local browser storage after a 500 ms
 
 ## Boundary and physical operation
 
-Run boundary is implemented in the simulator at `origin.z + penLift`, after complete source and raised-path validation, using the same home prerequisite and exclusive scheduler as other jobs. It is a rectangle preview; it does not draw ink or perform collision avoidance. Physical USB motion, homing, pen-contact calibration, drawing execution and verified pause/stop are still **not implemented**: the USB bridge remains query-only. These cannot be declared working without a connected device and measured behavior.
+Run boundary is implemented in the simulator at `origin.z + penLift`, after complete source and raised-path validation, using the same home prerequisite and exclusive scheduler as other jobs. It is a rectangle preview; it does not draw ink or perform collision avoidance. Physical USB pen control now has explicit home, jog/XYZ, drawing and reviewed G-code execution from the persistent header. Port selection, firmware/position reports, manual jog/XYZ and diagnostics are in Robot settings, available in every mode. The main process validates the whole path and approach, including theoretical pen reach, before streaming. Jobs finish with M400 and an M114 refresh. Pause drains queued motion; Stop requests M410 and discards the session. These functions are software-tested with fake serial devices, **not verified on a DexArm**. Pen-contact calibration and collision checking remain manual/unimplemented. The canvas and boundary preview still operate the simulator.
 
-Before physical execution can be enabled: identify the connected firmware and tool, establish actual machine/work coordinates and pen contact height, validate motion-envelope/tool offsets and clearance, verify acknowledgement versus completed motion and M400, and measure stop/pause/unplug recovery. No automatic sending, firmware changes or physical moves were added in this batch.
+Before commissioning: identify firmware/tool, establish actual coordinates and contact height, check mounting offsets and clearance, then measure acknowledgement/completion, stop/pause and unplug recovery.
 
 Physical test IDs, acceptance evidence and run records are tracked in [dexarm-hardware-tests.md](dexarm-hardware-tests.md). All hardware entries are currently pending.
 

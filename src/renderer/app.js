@@ -60,14 +60,35 @@ function renderUsb() {
   const available = Boolean(usb);
   const connected = usbState.status === 'connected';
   const opening = usbState.status === 'connecting';
-  $('usb-availability').textContent = available ? 'Desktop USB diagnostics. The workspace and motion controls still operate the simulator.' : 'USB diagnostics require the Electron desktop app (npm start). Simulation works in this browser.';
+  $('usb-availability').textContent = available ? 'Physical pen settings. Header controls operate the robot; the canvas shows simulation.' : 'Robot USB requires the desktop app (npm start). Simulation works in this browser.';
   $('usb-port').disabled = !available || connected || opening || usbRefreshing;
   $('usb-refresh').disabled = !available || opening || usbRefreshing;
   $('usb-refresh').textContent = usbRefreshing ? 'Finding ports…' : 'Refresh ports';
-  $('usb-connect').disabled = !available || usbRefreshing || (!connected && !opening && !$('usb-port').value);
-  $('usb-connect').textContent = opening ? 'Cancel connection' : connected ? 'Disconnect USB' : 'Connect USB';
+  $('usb-connect').disabled = !available || usbRefreshing || usbState.status === 'stopping';
+  $('usb-connect').textContent = opening ? 'Cancel connection' : connected ? 'Disconnect robot' : 'Connect robot';
   $('usb-status').textContent = usbState.message;
+  const states = { disconnected: 'Disconnected', connecting: 'Connecting…', stopping: 'Stop requested…', faulted: 'Connection fault' };
+  $('usb-connection-label').textContent = !available ? 'Desktop app required' : connected
+    ? usbState.busy ? { running: 'Running', pausing: 'Pausing…', paused: 'Paused' }[usbState.job] || 'Working…'
+      : usbState.homed ? 'Ready · homed' : usbState.firmware ? 'Needs home' : 'Read firmware in settings'
+    : states[usbState.status] || 'Disconnected';
+  $('usb-connection-label').title = usbState.message;
+  $('usb-connection-dot').classList.toggle('online', connected);
+  $('usb-connection-dot').classList.toggle('faulted', usbState.status === 'faulted');
+  $('usb-drawing').hidden = tab !== 'draw';
+  $('usb-gcode').hidden = tab !== 'gcode';
   $('usb-firmware').disabled = $('usb-position').disabled = !connected || usbState.busy;
+  const ready = connected && usbState.homed && !usbState.busy;
+  $('usb-move').disabled = !ready;
+  $('usb-home').disabled = !connected || usbState.busy || !usbState.firmware;
+  document.querySelectorAll('[data-usb-axis]').forEach((button) => { button.disabled = !ready; });
+  $('usb-drawing').disabled = !ready || !generated || fontBusy;
+  $('usb-gcode').disabled = !ready || !importedJob;
+  $('usb-pause').disabled = !['running', 'paused'].includes(usbState.job);
+  $('usb-pause').textContent = usbState.job === 'paused' ? 'Resume robot' : usbState.job === 'pausing' ? 'Pausing…' : 'Pause robot';
+  $('usb-stop').disabled = !connected;
+  $('usb-progress').hidden = !usbState.total;
+  $('usb-progress').textContent = usbState.total ? `${usbState.completed || 0} / ${usbState.total} commands acknowledged · ${usbState.job || 'idle'}` : 'No physical job';
   $('usb-export').disabled = !usbState.log.length;
   $('usb-firmware-report').textContent = usbState.firmware || 'Not reported';
   $('usb-position-report').textContent = usbState.position ? ['x', 'y', 'z'].map((axis) => `${axis.toUpperCase()} ${usbState.position[axis].toFixed(2)}`).join(' · ') : 'Unknown · not physical tracking';
@@ -340,6 +361,7 @@ function render() {
   $('progress-count').textContent = controller.total ? `${controller.completed} / ${controller.total} commands` : '—';
   $('job-progress').max = controller.total || 1;
   $('job-progress').value = controller.completed;
+  renderUsb();
   $('run-hint').textContent = fontBusy ? 'Font conversion in progress. You can cancel and keep completed glyph paths.' : active() ? '3 · Job in progress. Pause or stop the simulator below.' : !reviewed ? tab === 'gcode' ? '1 · Open or paste source, then review G-code. No connection needed.' : tab === 'teach' ? '1 · Add or record steps, then generate G-code. You can edit offline.' : '1 · Arrange text and artwork. Then generate G-code, even while disconnected.' : !ready ? '2 · G-code ready. Download it, or connect and home the simulator for step 3.' : '3 · G-code ready. Send this generated job to the simulator.';
   $('step-prepare').querySelector('b').textContent = tab === 'gcode' ? 'Source' : tab === 'teach' ? 'Sequence' : 'Layout';
   $('step-preview').querySelector('b').textContent = tab === 'gcode' ? 'Review G-code' : 'Generate G-code';
@@ -441,11 +463,10 @@ document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListe
   $('gcode-settings').hidden = tab !== 'gcode';
   $('teach-settings').hidden = tab !== 'teach';
   $('jog-settings').hidden = !['control', 'teach'].includes(tab);
-  $('usb-settings').hidden = tab !== 'control';
   $('generated-code').hidden = ['control', 'joypad'].includes(tab);
   $('open').hidden = $('save').hidden = tab !== 'draw';
   const titles = { draw: 'Drawing workspace', control: 'Manual control', gcode: 'G-code workspace', teach: 'Teach & Play', joypad: 'Joypad control' };
-  const descriptions = { draw: 'Create your layout, generate G-code, then send the checked job.', control: 'Move to coordinates or jog the simulator. USB diagnostics stay separate.', gcode: 'Open or paste XYZ G-code, review the path, then simulate.', teach: 'Record points, arrange actions, and replay a repeatable sequence.', joypad: 'Use a game controller to jog the simulator. Hold to move; release to stop issuing steps.' };
+  const descriptions = { draw: 'Create your layout, generate G-code, then send the checked job.', control: 'Jog the simulator here. Physical robot controls and settings are in the header.', gcode: 'Open or paste XYZ G-code, review the path, then simulate.', teach: 'Record points, arrange actions, and replay a repeatable sequence.', joypad: 'Use a game controller to jog the simulator. Hold to move; release to stop issuing steps.' };
   $('page-title').textContent = titles[tab];
   $('page-description').textContent = descriptions[tab];
   $('canvas-instructions').textContent = tab === 'joypad' ? 'Live simulator pen position. Left stick: XY; right stick: Z. Hold RB/R1 to jog. Height is shown in Device. No collision simulation.' : tab === 'gcode' ? 'Green: first point. Amber: last point. Top view only; initial approach and Z motion are not shown.' : tab === 'teach' ? 'Move directly between recorded points. Add explicit lift points for clearance. Green: first point; amber: last point. No collision simulation.' : tab === 'control' ? 'Jog or move to explicit XYZ coordinates. The drawing is shown for reference; manual moves do not change it.' : 'Drag objects or SVG corner handles. Shift-click or use the object list for multiple selection. Arrow keys move the selection 1 mm; Shift moves 10 mm.';
@@ -676,14 +697,43 @@ $('usb-refresh').addEventListener('click', () => perform(async () => {
   }
 }));
 $('usb-port').addEventListener('change', renderUsb);
+function positionRobotSettings() {
+  const top = document.querySelector('.topbar').getBoundingClientRect().bottom + 8;
+  $('usb-settings').style.top = `${top}px`;
+  $('usb-settings').style.maxHeight = `${Math.max(120, window.innerHeight - top - 16)}px`;
+}
+window.addEventListener('resize', positionRobotSettings);
+$('usb-settings').addEventListener('toggle', (event) => {
+  if (event.newState === 'open') positionRobotSettings();
+  if (event.newState === 'open' && usb && !['connected', 'connecting'].includes(usbState.status) && !usbRefreshing) $('usb-refresh').click();
+});
 $('usb-connect').addEventListener('click', () => perform(async () => {
   if (['connected', 'connecting'].includes(usbState.status)) await usb.disconnect();
-  else await usb.connect($('usb-port').value);
+  else if (!$('usb-port').value) {
+    $('usb-settings').showPopover();
+    $('usb-port').focus();
+  } else {
+    $('usb-settings').hidePopover();
+    await usb.connect($('usb-port').value);
+  }
 }));
+$('usb-move').addEventListener('click', () => perform(() => usb.move({ position: Object.fromEntries(['x', 'y', 'z'].map((a) => [a, $(`usb-target-${a}`).valueAsNumber])), feedrate: $('usb-feed').valueAsNumber })));
+$('usb-home').addEventListener('click', () => perform(() => usb.home()));
+document.querySelectorAll('[data-usb-axis]').forEach((button) => button.addEventListener('click', () => perform(() => usb.move({ axis: button.dataset.usbAxis, distance: Number(button.dataset.usbDirection) * Number($('usb-step').value), feedrate: $('usb-feed').valueAsNumber }))));
+$('usb-drawing').addEventListener('click', () => perform(async () => {
+  if (!generated || JSON.stringify(readProject()) !== JSON.stringify(generated.project)) throw new Error('Generate the current drawing before sending to USB');
+  await usb.run({ project: generated.project });
+}));
+$('usb-gcode').addEventListener('click', () => perform(async () => {
+  if (!importedJob || importedJob.source !== $('gcode-source').value) throw new Error('Review the current G-code before sending to USB');
+  await usb.run({ source: importedJob.source });
+}));
+$('usb-pause').addEventListener('click', () => perform(() => usbState.job === 'paused' ? usb.resume() : usb.pause()));
+$('usb-stop').addEventListener('click', () => perform(() => usb.stop()));
 $('usb-firmware').addEventListener('click', () => perform(() => usb.query('M115')));
 $('usb-position').addEventListener('click', () => perform(() => usb.query('M114')));
 $('usb-export').addEventListener('click', () => {
-  const report = { exportedAt: new Date().toISOString(), mode: 'USB diagnostics only; motion disabled', ...usbState };
+  const report = { exportedAt: new Date().toISOString(), mode: 'Physical USB pen control; hardware behavior unverified', ...usbState };
   const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
   const link = document.createElement('a');
   link.href = url;

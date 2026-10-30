@@ -18,7 +18,7 @@ export class Controller extends EventTarget {
     this.jobName = '';
     this.pump = 'off';
     this.log = [];
-    this.message = 'Connect the simulator to begin. Physical robot control is not enabled.';
+    this.message = 'Connect the simulator to begin. Physical robot controls are in the header.';
   }
 
   update() { this.dispatchEvent(new Event('change')); }

@@ -1,6 +1,6 @@
 # DexArm Studio
 
-An offline desktop application foundation for the Rotrics DexArm. Drawing and jogging run in a simulator. The desktop app also offers **USB diagnostics**, with physical motion disabled.
+An offline desktop application foundation for the Rotrics DexArm. Drawing and jogging support simulation. The desktop app also offers **physical USB pen control**, implemented and tested with fake serial devices; real DexArm behavior remains unverified.
 
 ## Build and install from source
 
@@ -38,7 +38,7 @@ For drawing with bundled fonts, G-code generation/export, and simulation in a br
 npm run dev
 ```
 
-Open [DexArm Studio locally](http://127.0.0.1:4173). The development server listens on loopback only; stop it with Ctrl+C. Browser mode has no USB diagnostics; use the desktop app for those.
+Open [DexArm Studio locally](http://127.0.0.1:4173). The development server listens on loopback only; stop it with Ctrl+C. Browser mode has no USB access; use the desktop app for physical robot control.
 
 ### Verify the source checkout
 
@@ -59,7 +59,7 @@ If installation or startup fails:
 - If Electron's runtime download fails, check Internet/proxy access and run `npx --no-install install-electron`, then retry `npm start`.
 - If Linux reports missing shared libraries or no display, install the Electron prerequisites for your distribution and run inside a graphical session. The browser interface remains available with `npm run dev`.
 - SerialPort normally uses a prebuilt native binding. If npm reports blocked install scripts, review them with `npm install-scripts ls` on npm versions supporting that command; approve only the required package, such as `@serialport/bindings-cpp`, rather than enabling all dependency scripts. If your platform needs to compile it, install the platform's native build toolchain and Python required by node-gyp, then rerun `npm ci`.
-- If a USB port cannot be opened, check OS permissions/drivers and whether another application owns it. USB diagnostics are optional; they do not enable physical motion.
+- If a USB port cannot be opened, check OS permissions/drivers and whether another application owns it. The simulator works without USB. Physical controls require an explicit connection, firmware read and Home.
 
 After updating the checkout, run `git pull` followed by `npm ci` and the verification commands again. Local projects are separate `.dexarm.json` files; transfer them separately to the other machine.
 
@@ -124,7 +124,7 @@ Choose **Pen path → Outline / Centerline** in the right-hand drawing menu. Eac
 - Invalid edits leave the last valid canvas visible, show an inline explanation, and require successful G-code generation before Send is enabled. Text must also fit the illustrative workspace, including pen-up clearance.
 - Saving retains each box’s editable text, font, style, path mode, position, size, spacing, and alignment. Text boxes can share the layout with multiple imported SVG objects. Imported font geometry is saved once in the project, so reopening it on another machine needs no font installation. Set **Rotation** (−180…180°) to turn a box around its center; positive angles turn counterclockwise. **Duplicate** adds an independently editable copy at the same position; drag it or change its X/Y offsets. Rotated paths are used for preview, bounds validation, saved projects and generated G-code.
 
-Writing execution remains simulated. USB diagnostics cannot send writing or other motion commands to a physical robot.
+Generated lettering can be simulated or sent using **Send drawing** in the desktop header after USB connection, firmware review and homing. Physical lettering quality remains unverified.
 
 An optional [custom-font centerline experiment](docs/experiments/centerline/README.md) tests ordinary outline fonts with OpenType.js and flo-mat. It produces centerline SVGs and validated simulator projects. The app also supports direct font imports; the report includes comparison images, measured results, and limitations.
 
@@ -148,16 +148,18 @@ Drawing setup also provides separate **Work speed**, **Travel speed** and **Pen 
 
 See the [legacy feature comparison and next milestones](docs/feature-parity.md) for the remaining laser, Scratch, accessory, firmware and physical-execution gaps; 3D printing is intentionally out of scope.
 
-## USB diagnostics (desktop only)
+## Physical USB pen control (desktop only)
 
-1. Run `npm start` and select **Control**. The **USB diagnostics** panel is separate from the simulated device controls.
-2. Click **Refresh ports**, then select the computer-facing serial port. The list includes other serial devices; it does not identify or certify a DexArm. Check the model-specific data cable and computer port in the Rotrics manual. Close other applications that might own the port.
-3. Click **Connect USB**. The app opens that port at 115200 baud, 8 data bits, no parity, one stop bit, and no flow control. Connecting sends **no commands**. Opening a serial connection may still reset some hardware, so connect only the intended device with its work area clear.
-4. Click **Read firmware** (`M115`) or **Read position** (`M114`). These are the only commands accepted by both the IPC interface and device service. There is no raw command console or physical home/jog/run action.
-5. Inspect the separate reports and USB transcript. **Export diagnostic report** downloads the selected port path, firmware report, latest reported coordinates, status, and recent transcript as local JSON. Review it before sharing; it can contain device-specific information.
-6. Click **Disconnect USB** when finished. Disconnection does not halt a robot or switch off its tools. Errors require an explicit reconnection; no commands are retried automatically.
+1. Run `npm start`. The persistent **DexArm · USB** header shows physical connection status and **Connect robot**, **Home robot**, **Send drawing / Send G-code**, **Pause robot / Resume robot**, **Stop robot**, and **Robot settings** in every workspace. Simulator controls are separately labeled on the upper row.
+2. Click **Connect robot** to open **Robot settings** and list ports, or open **Robot settings** directly. Select the computer-facing serial port. The list includes other serial devices; it does not identify or certify a DexArm. Check the model-specific data cable and computer port in the Rotrics manual. Close other applications that might own the port.
+3. Click **Connect robot** again after selecting a port. The app opens that port at 115200 baud, 8 data bits, no parity, one stop bit, and no flow control. Connecting sends **no commands**. Opening a serial connection may still reset some hardware, so connect only the intended device with its work area clear.
+4. Click **Read firmware** (`M115`) or **Read position** (`M114`). Check the firmware report in **Robot settings**, then click **Home robot** in the header. Home sends M1112, waits for M400, and requires an M114 position report. Connecting alone never homes. No raw command console is exposed.
+5. After homing, USB jog buttons and **Move physical arm to XYZ** are available in **Robot settings**, alongside port setup, firmware/position reports and diagnostic export. Generate a drawing in Drawing mode or review an import in G-code mode, then use **Send drawing** or **Send G-code** in the header without changing modes. The main process validates the whole job and initial approach before sending. Only one physical operation can own the connection.
+6. **Pause robot** stops streaming after the current acknowledgement and waits for M400 before showing paused. Resume continues only that session. **Stop robot** (M410) requests quick-stop without waiting behind the pending command, discards the job and disconnects; reconnect and home before further motion. A successful write is not evidence of a physical stop.
+7. Inspect the separate reports and USB transcript. **Export diagnostic report** downloads the selected port path, firmware report, latest reported coordinates, status, and recent transcript as local JSON. Review it before sharing; it can contain device-specific information.
+8. Close settings using **Close**, Escape, or a click outside the panel. The physical Stop remains accessible in the header while settings are open. Click **Disconnect robot** when finished. Disconnection does not halt a robot or switch off its tools. Errors require an explicit reconnection; no commands are retried automatically.
 
-The simulator may run while USB diagnostics are connected. Its canvas, coordinates, Home, Stop, and job controls always refer to the **simulator**, never the physical arm. Physical reports are not calibrated tracking, and a firmware name is not proof of hardware identity. There is no automatic polling.
+The simulator may run while USB is connected; it does not own or control the physical connection. Its canvas, coordinates, Home, Stop, and job controls always refer to the **simulator**, never the physical arm. Physical reports are not calibrated tracking, and a firmware name is not proof of hardware identity. There is no automatic polling. Physical jobs retain the existing 60–3,000 mm/min cap and rectangular commissioning bounds, additionally checking the theoretical pen reach at 1 mm intervals with an extra 2 mm margin, including raised travel and initial approach. This is not a collision model or measured calibration. Motion acknowledgements have a 120-second deadline; diagnostics use 5 seconds. Errors, unplugging and timeouts invalidate home/position and never automatically resend or resume motion. Pneumatic, laser and printing commands are rejected.
 
 In the browser preview, USB controls explain that Electron is required and remain unavailable. If the native serial bindings fail to load, the simulator remains usable. Port errors usually require checking drivers, permissions, the data cable, or another application's ownership; the app does not change system permissions.
 
@@ -167,9 +169,10 @@ In the browser preview, USB controls explain that Electron is required and remai
 npm test
 npm run check
 npm run test:svg
+npm run test:usb
 ```
 
-Tests use Node's built-in test runner, without third-party test dependencies. They cover serial message framing, command ordering, timeouts, disconnects, acknowledgement matching, job pause/resume/stop, homing prerequisites, decimal jogging, project validation, pen-up bounds, SVG path parsing, transforms, curve flattening, text layout/font coverage, editable writing projects, multi-text layouts and legacy migration, actual font styles, complete-layout compilation, motion settings, G-code parsing and canonicalization, sequence generation/playback, and USB diagnostics with fake ports. IPC tests verify sender/frame authorization and the exact query whitelist. Tests never open a physical serial port. Individual test files can also be run directly, e.g. `node tests/writing.test.js`.
+Tests use Node's built-in test runner, without third-party test dependencies. They cover serial message framing, command ordering, timeouts, disconnects, acknowledgement matching, job pause/resume/stop, homing prerequisites, decimal jogging, project validation, pen-up bounds, SVG path parsing, transforms, curve flattening, text layout/font coverage, editable writing projects, multi-text layouts and legacy migration, actual font styles, complete-layout compilation, motion settings, G-code parsing and canonicalization, sequence generation/playback, and physical USB motion with fake ports, completion barriers, pause/resume, quick-stop, invalid-source rejection and fault recovery. `npm run test:usb` checks the actual sandboxed renderer, preload and IPC against a fake serial device. IPC tests verify sender/frame authorization and the exact query whitelist. Tests never open a physical serial port. Individual test files can also be run directly, e.g. `node tests/writing.test.js`.
 
 `npm run test:svg` uses a hidden Electron window to test the actual XML importer against valid and adversarial SVG fixtures. It requires Electron's desktop system dependencies. It does not connect to hardware or require the preview server.
 
@@ -187,8 +190,8 @@ Tests use Node's built-in test runner, without third-party test dependencies. Th
 
 ```text
 src/main/main.cjs       Electron entry point; sandboxed renderer, no Node access
-src/main/preload.cjs    Narrow USB diagnostics bridge
-src/main/device.js      Main-process USB connection and diagnostic state
+src/main/preload.cjs    Narrow USB control bridge
+src/main/device.js      Main-process USB connection, validation and physical job state
 src/main/device-ipc.cjs IPC authorization and command validation
 src/protocol/          Command scheduler and deterministic serial simulator
 src/core/              Device/job state and validated drawing projects
@@ -218,9 +221,9 @@ The interface uses standard browser modules and native controls. Electron and Se
 
 - SVG import supports the subset described above. G-code import is limited to the reviewed XYZ subset above. Teach playback is simulated. 3D printing is intentionally excluded from the product scope. Laser, Scratch and firmware updates are not implemented.
 - Workspace bounds (`X −150…150`, `Y 180…380`, `Z −20…100`) are illustrative simulator limits, **not validated DexArm limits**. Projects must fit both the drawing and its configured pen lift inside them.
-- Simulator acknowledgements follow simulated completion. Real firmware can buffer motion; pause, cancellation, `M400`, command deadlines, and output shutdown need hardware verification before enabling physical commands.
-- Stop is a simulator cancellation action, not a physical emergency stop. No claim is made about laser safety, collision avoidance, calibration, or hardware accuracy.
+- Simulator acknowledgements follow simulated completion. Real firmware can buffer motion; pause, cancellation, `M400`, command deadlines, and output shutdown remain unverified on hardware despite passing fake-device tests.
+- The main Stop cancels simulation. The separate USB Stop requests M410, then disconnects; neither is a physical emergency stop. No claim is made about laser safety, collision avoidance, calibration, or hardware accuracy.
 - Projects are versioned JSON capped at 4 MB on import and export. Imported settings and artwork are validated, unknown fields are discarded, and files are never executed.
 - This is an independent prototype; official branding, old project compatibility, and reuse of upstream assets have not been established.
 
-The next milestone is validating diagnostic transcripts and a capability matrix for a specific arm/firmware/OS before enabling physical motion. USB behavior has been tested with fake ports and native binding enumeration, not an actual DexArm. See [research and delivery plan](docs/studio-research-and-plan.md).
+The next milestone is commissioning these controls on a specific arm/firmware/OS using the [hardware test ledger](docs/dexarm-hardware-tests.md). USB behavior has been tested with fake ports and native binding enumeration, not an actual DexArm. See [research and delivery plan](docs/studio-research-and-plan.md).

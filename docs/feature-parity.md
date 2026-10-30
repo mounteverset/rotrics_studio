@@ -1,12 +1,12 @@
 # Rotrics Studio feature parity
 
-Reviewed 27 October 2026 against the manufacturer's manual and the public Studio `dev` source. The source branch and old manual are behavior references, not proof that every released installer behaves identically. This replacement remains a simulator with separate read-only USB diagnostics. **No physical feature parity is claimed.** Pending device tests are tracked in the [running hardware ledger](dexarm-hardware-tests.md).
+Reviewed 27 October 2026 against the manufacturer's manual and the public Studio `dev` source. The source branch and old manual are behavior references, not proof that every released installer behaves identically. This replacement includes simulation and separate physical USB pen controls tested against fake serial devices. **No physical feature parity is claimed.** Pending device tests are tracked in the [running hardware ledger](dexarm-hardware-tests.md).
 
 ## Baseline and current coverage
 
 | Original capability | Replacement status | Remaining gap |
 | --- | --- | --- |
-| Connect, position reports, device/firmware information | Desktop USB connection and explicit M114/M115 diagnostics | Physical motion and module detection/selection not enabled |
+| Connect, position reports, device/firmware information | Desktop USB connection, M114/M115, explicit home/jog/XYZ and validated drawing/G-code streaming | USB pen jobs implemented; physical qualification and module detection/selection pending |
 | Home and XYZ jogging | Simulator home, discrete jog, configurable speed, direct XYZ moves | Physical homing, motion envelopes, and fast motion mode need validation |
 | Drawing SVG/text, dimensions, origin, generate/download G-code | Implemented; Version 3 multi-SVG/text layouts, real font styles and centerlines, canvas transforms/mirroring, presets, grouping/alignment, undo/recovery, hatching, travel optimization, paper guides and motion estimates | Physical drawing/work-height calibration; general SVG/path editing |
 | Work speed, travel speed, pen offset | Separate drawing work/travel speeds and adjustable pen lift | Limits remain illustrative; default legacy output is preserved |
@@ -50,7 +50,7 @@ Drawing projects accept optional `travelFeedrate` (60–3,000 mm/min) and `penLi
 2. Laser/raster job preparation, with tool-specific previews and formats. 3D printing, including external-slicer print inspection, is intentionally excluded from the current and foreseeable scope. Treat hardware execution as a separate milestone.
 3. Blocks programming and accessories, followed by firmware/settings/localization and platform packaging.
 
-Physical execution requires device/firmware identification and observed serial transcripts, calibrated coordinates/tool offsets, motion-envelope tests, and verified pause/stop/output-off behavior. The existing USB query whitelist remains unchanged in this batch.
+Physical execution requires device/firmware identification and observed serial transcripts, calibrated coordinates/tool offsets, motion-envelope tests, and verified pause/stop/output-off behavior. USB pen commands now use main-process validation and a dedicated physical job lock; tools, printing and raw commands remain rejected.
 
 ## Sources inspected
 

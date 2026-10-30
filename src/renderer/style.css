@@ -41,11 +41,14 @@ button:hover:not(:disabled) {
   display:none!important;
 }
 .topbar {
-  height:78px;
-  display:flex;
+  display:grid;
+  grid-template-columns:auto 1fr;
   align-items:center;
-  gap:24px;
-  padding:0 30px;
+  gap:12px 24px;
+  padding:14px 30px;
+  position:sticky;
+  top:0;
+  z-index:20;
   background:#fff;
   border-bottom:1px solid var(--border);
 }
@@ -135,7 +138,7 @@ button:hover:not(:disabled) {
 .app-layout {
   display:grid;
   grid-template-columns:195px minmax(0,1fr);
-  min-height:calc(100vh - 78px);
+  min-height:calc(100vh - 126px);
 }
 .sidebar {
   border-right:1px solid var(--border);
@@ -1040,7 +1043,7 @@ dialog p {
 #workspace { touch-action:none; }
 #drawing-settings { order:0; }
 .device-card { order:1; }
-#jog-settings,#usb-settings { order:2; }
+#jog-settings { order:2; }
 .workflow-card { margin-bottom:20px; padding:16px 20px; display:flex; flex-wrap:wrap; gap:9px; align-items:center; }
 .workflow-card h2 { width:100%; }
 .workflow-card>p { width:100%; margin:0; }
@@ -1104,3 +1107,48 @@ dialog p {
 .paper-margin { fill:none; stroke:#c59b61; stroke-dasharray:3 4; }
 .text-box .resize-handle { fill:#567fd1; stroke:white; stroke-width:1.5; cursor:nwse-resize; pointer-events:all; }
 .drawing-options { margin:14px 0; border-top:1px solid var(--border); padding-top:12px; }
+
+.robot-bar {
+  grid-column:1/-1;
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:10px;
+  border-top:1px solid var(--border);
+  padding-top:12px;
+}
+.robot-identity {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width:180px;
+  font-size:12px;
+}
+.robot-identity strong { display:block; }
+#usb-connection-label { display:block; color:var(--muted); font-size:11px; margin-top:3px; }
+.status-dot.faulted { background:#c33d45; }
+.robot-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-left:auto; }
+.robot-progress { flex-basis:100%; margin:0; text-align:right; }
+.robot-settings {
+  position:fixed;
+  inset:150px 20px auto auto;
+  margin:0;
+  width:420px;
+  max-width:calc(100vw - 32px);
+  max-height:calc(100dvh - 166px);
+  overflow:auto;
+  padding:22px;
+  background:white;
+  color:inherit;
+  border:1px solid var(--border);
+  border-radius:12px;
+  box-shadow:0 16px 60px #26344826;
+}
+.robot-settings::backdrop { background:transparent; }
+.simulator-connection { flex-wrap:wrap; justify-content:flex-end; }
+@media(max-width:850px) {
+  .topbar { grid-template-columns:1fr; gap:12px; }
+  .simulator-connection { margin-left:0; justify-content:flex-start; }
+  .robot-actions { margin-left:0; }
+  .robot-progress { text-align:left; }
+}
